@@ -1,0 +1,124 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+
+:root {
+  --sidebar-width: 240px;
+  --header-height: 60px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  background-color: #F8FAFC;
+  color: #0F172A;
+}
+
+@layer components {
+  .card {
+    @apply bg-white rounded-xl border border-slate-200 shadow-sm p-5;
+  }
+
+  .card-hover {
+    @apply hover:shadow-md hover:border-slate-300 transition-all duration-150 cursor-pointer;
+  }
+
+  .btn-primary {
+    @apply bg-primary text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-primary-dark transition-colors;
+  }
+
+  .btn-secondary {
+    @apply bg-white text-slate-700 px-4 py-2 rounded-lg text-sm font-semibold border border-slate-300 hover:bg-slate-50 transition-colors;
+  }
+
+  .btn-ghost {
+    @apply bg-transparent text-primary px-4 py-2 rounded-lg text-sm font-semibold hover:bg-primary-light transition-colors;
+  }
+
+  .btn-danger {
+    @apply bg-danger text-white px-4 py-2 rounded-lg text-sm font-semibold hover:opacity-90 transition-opacity;
+  }
+
+  .badge {
+    @apply inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold;
+  }
+
+  .badge-primary {
+    @apply badge bg-primary-light text-primary;
+  }
+
+  .badge-success {
+    @apply badge bg-green-100 text-green-800;
+  }
+
+  .badge-warning {
+    @apply badge bg-amber-100 text-amber-800;
+  }
+
+  .badge-danger {
+    @apply badge bg-red-100 text-red-800;
+  }
+
+  .badge-gray {
+    @apply badge bg-slate-100 text-slate-700;
+  }
+
+  .input {
+    @apply w-full h-10 px-3 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent;
+  }
+
+  .label {
+    @apply block text-xs font-semibold text-slate-700 mb-1;
+  }
+
+  .section-title {
+    @apply text-base font-bold text-slate-900 mb-3 flex items-center gap-2;
+  }
+
+  .kpi-card {
+    @apply card;
+  }
+
+  .kpi-label {
+    @apply text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2;
+  }
+
+  .kpi-value {
+    @apply text-3xl font-bold text-slate-900 mb-1;
+  }
+
+  .kpi-change {
+    @apply text-xs flex items-center gap-1;
+  }
+
+  .progress-track {
+    @apply h-2 bg-slate-100 rounded-full overflow-hidden;
+  }
+
+  .progress-fill {
+    @apply h-full rounded-full transition-all duration-700;
+  }
+}
+
+::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #CBD5E1;
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #94A3B8;
+}
