@@ -46,6 +46,7 @@ enum TaskPriority {
 enum TaskStatus {
   TODO
   IN_PROGRESS
+  HOLD
   DONE
 }
 
@@ -245,6 +246,16 @@ model Task {
 
   user      User         @relation(fields: [userId], references: [id], onDelete: Cascade)
   goal      Goal?        @relation(fields: [goalId], references: [id], onDelete: SetNull)
+  updates   TaskUpdate[]
+}
+
+model TaskUpdate {
+  id        String   @id @default(cuid())
+  taskId    String
+  text      String   @db.Text
+  createdAt DateTime @default(now())
+
+  task      Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
 }
 
 model Goal {

@@ -10,17 +10,18 @@ import { Badge } from '@/components/ui/Badge';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import { useToast } from '@/components/ui/Toast';
-import { Plus, Trash2, Flame, Activity, Moon, Dumbbell, Pencil } from 'lucide-react';
+import { Plus, Trash2, Activity, Dumbbell, Pencil } from 'lucide-react';
 import { format, subDays } from 'date-fns';
-import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
 
-type Tab = 'habits' | 'workouts' | 'sleep';
+type Tab = 'habits' | 'workouts';
 
 const EMOJI_OPTIONS = ['💪','🏃','🧘','📚','💤','🥗','💧','🎯','✍️','🎵','🧠','🌅','🚴','🏊','🥗','☕','🌿','⏰','📱','🏋️'];
 const COLOR_PRESETS = ['#3B82F6','#8B5CF6','#10B981','#F59E0B','#EF4444','#06B6D4'];
 const WORKOUT_TYPES = ['RUNNING','GYM','YOGA','CYCLING','SWIMMING','OTHER'];
 const WORKOUT_EMOJI: Record<string, string> = { RUNNING: '🏃', GYM: '🏋️', YOGA: '🧘', CYCLING: '🚴', SWIMMING: '🏊', OTHER: '💪' };
 const INTENSITY_LEVELS = ['LOW','MEDIUM','HIGH'];
+
+type Habit = { id: string; icon: string; name: string; color: string; frequency: string; targetDays: number };
 
 function WeekDots({ habitId, logs }: { habitId: string; logs: { habitId: string; date: string; completed: boolean }[] }) {
   const days: Date[] = [];
@@ -45,6 +46,8 @@ export default function ActivityPage() {
   const [tab, setTab] = useState<Tab>('habits');
   const [showModal, setShowModal] = useState<string | null>(null);
   const [form, setForm] = useState<Record<string, string>>({});
+  const [editingHabit, setEditingHabit] = useState<Habit | null>(null);
+  const [editForm, setEditForm] = useState<Record<string, string>>({});
   const qc = useQueryClient();
   const { toast } = useToast();
 
@@ -57,14 +60,17 @@ export default function ActivityPage() {
   const { data: workoutsData, isLoading: workoutsLoading } = useQuery({
     queryKey: ['workouts'], queryFn: () => axios.get('/api/workouts').then(r => r.data), enabled: tab === 'workouts',
   });
-  const { data: sleepData, isLoading: sleepLoading } = useQuery({
-    queryKey: ['sleep-logs'], queryFn: () => axios.get('/api/sleep-logs').then(r => r.data), enabled: tab === 'sleep',
-  });
 
   const addHabit = useMutation({
     mutationFn: (d: Record<string, string>) => axios.post('/api/habits', { ...d, targetDays: Number(d.targetDays) || 7 }),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['habits'] }); setShowModal(null); toast('Habit added! +10 XP 🎯'); },
     onError: () => toast('Failed to add habit', 'error'),
+  });
+  const updateHabit = useMutation({
+    mutationFn: ({ id, ...d }: { id: string } & Record<string, string>) =>
+      axios.patch(`/api/habits/${id}`, { ...d, targetDays: d.targetDays ? Number(d.targetDays) : undefined }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['habits'] }); setEditingHabit(null); toast('Habit updated! ✏️'); },
+    onError: () => toast('Failed to update habit', 'error'),
   });
   const deleteHabit = useMutation({
     mutationFn: (id: string) => axios.delete(`/api/habits/${id}`),
@@ -79,22 +85,16 @@ export default function ActivityPage() {
     mutationFn: (id: string) => axios.delete(`/api/workouts/${id}`),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['workouts'] }); toast('Workout deleted'); },
   });
-  const addSleep = useMutation({
-    mutationFn: (d: Record<string, string>) => axios.post('/api/sleep-logs', { ...d, qualityRating: Number(d.qualityRating) }),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['sleep-logs'] }); setShowModal(null); toast('Sleep logged! 😴'); },
-    onError: () => toast('Failed to log sleep', 'error'),
-  });
-  const deleteSleep = useMutation({
-    mutationFn: (id: string) => axios.delete(`/api/sleep-logs/${id}`),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['sleep-logs'] }); toast('Sleep log deleted'); },
-  });
 
-  const habits = habitsData?.habits ?? [];
+  const habits: Habit[] = habitsData?.habits ?? [];
   const logs = logsData?.logs ?? [];
   const workouts = workoutsData?.workouts ?? [];
-  const sleepLogs = sleepData?.sleepLogs ?? [];
 
   const openModal = (type: string) => { setForm({}); setShowModal(type); };
+  const openEditHabit = (habit: Habit) => {
+    setEditingHabit(habit);
+    setEditForm({ name: habit.name, icon: habit.icon, color: habit.color, frequency: habit.frequency, targetDays: String(habit.targetDays) });
+  };
 
   return (
     <div className="p-6 space-y-6">
@@ -102,10 +102,10 @@ export default function ActivityPage() {
 
       {/* Tabs */}
       <div className="flex gap-1 p-1 bg-slate-800 rounded-xl border border-slate-700 w-fit">
-        {(['habits','workouts','sleep'] as Tab[]).map(t => (
+        {(['habits','workouts'] as Tab[]).map(t => (
           <button key={t} onClick={() => setTab(t)}
             className={`px-4 py-2 rounded-lg text-sm font-medium capitalize transition-colors ${tab === t ? 'bg-blue-500 text-white shadow-sm' : 'text-slate-400 hover:text-slate-100'}`}>
-            {t === 'habits' ? '🎯 Habits' : t === 'workouts' ? '💪 Workouts' : '😴 Sleep'}
+            {t === 'habits' ? '🎯 Habits' : '💪 Workouts'}
           </button>
         ))}
       </div>
@@ -117,7 +117,7 @@ export default function ActivityPage() {
             <EmptyState icon={<Activity size={24} />} title="No habits yet" description="Start building consistent habits to earn XP and track your progress." action={{ label: 'Add First Habit', onClick: () => openModal('habit') }} />
           ) : (
             <div className="space-y-3">
-              {habits.map((habit: { id: string; icon: string; name: string; color: string; frequency: string }) => (
+              {habits.map((habit) => (
                 <div key={habit.id} className="flex items-center gap-4 p-4 rounded-xl bg-slate-700/50 hover:bg-slate-700 transition-colors group">
                   <div className="w-2 h-8 rounded-full flex-shrink-0" style={{ background: habit.color }} />
                   <span className="text-2xl flex-shrink-0">{habit.icon}</span>
@@ -126,9 +126,14 @@ export default function ActivityPage() {
                     <p className="text-xs text-slate-400 capitalize">{habit.frequency.toLowerCase()}</p>
                   </div>
                   <WeekDots habitId={habit.id} logs={logs} />
-                  <button onClick={() => deleteHabit.mutate(habit.id)} className="opacity-0 group-hover:opacity-100 transition-opacity text-slate-500 hover:text-red-400">
-                    <Trash2 size={16} />
-                  </button>
+                  <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <button onClick={() => openEditHabit(habit)} className="text-slate-400 hover:text-blue-400 p-1 rounded transition-colors" title="Edit habit">
+                      <Pencil size={15} />
+                    </button>
+                    <button onClick={() => deleteHabit.mutate(habit.id)} className="text-slate-500 hover:text-red-400 p-1 rounded transition-colors" title="Delete habit">
+                      <Trash2 size={15} />
+                    </button>
+                  </div>
                 </div>
               ))}
             </div>
@@ -160,46 +165,6 @@ export default function ActivityPage() {
         </Card>
       )}
 
-      {/* SLEEP */}
-      {tab === 'sleep' && (
-        <>
-          {sleepLogs.length > 0 && (
-            <div className="grid grid-cols-3 gap-4">
-              {[
-                { label: '7-day avg', value: `${(sleepLogs.slice(0,7).reduce((s: number, l: { totalHours: number }) => s + l.totalHours, 0) / Math.min(7, sleepLogs.length)).toFixed(1)}h` },
-                { label: 'Avg quality', value: `${(sleepLogs.slice(0,7).reduce((s: number, l: { qualityRating: number }) => s + l.qualityRating, 0) / Math.min(7, sleepLogs.length)).toFixed(1)}/5` },
-                { label: 'Logs total', value: sleepLogs.length },
-              ].map(stat => (
-                <div key={stat.label} className="bg-slate-800 rounded-xl border border-slate-700 p-4 text-center">
-                  <p className="text-xl font-bold text-slate-100">{stat.value}</p>
-                  <p className="text-xs text-slate-400 mt-1">{stat.label}</p>
-                </div>
-              ))}
-            </div>
-          )}
-          <Card title="Sleep Logs" action={<button onClick={() => openModal('sleep')} className="flex items-center gap-1.5 text-sm bg-blue-500 hover:bg-blue-400 text-white px-3 py-1.5 rounded-lg font-medium transition-colors"><Plus size={14} />Log Sleep</button>}>
-            {sleepLoading ? <LoadingSpinner className="py-8" /> : sleepLogs.length === 0 ? (
-              <EmptyState icon={<Moon size={24} />} title="No sleep logs" description="Track your sleep to earn XP and improve your health score." action={{ label: 'Log Sleep', onClick: () => openModal('sleep') }} />
-            ) : (
-              <div className="space-y-3">
-                {sleepLogs.map((sl: { id: string; bedtime: string; wakeTime: string; totalHours: number; qualityRating: number; loggedAt: string }) => (
-                  <div key={sl.id} className="flex items-center gap-4 p-4 rounded-xl bg-slate-700/50 hover:bg-slate-700 transition-colors group">
-                    <Moon size={20} className="text-violet-400 flex-shrink-0" />
-                    <div className="flex-1">
-                      <p className="font-medium text-slate-100">{format(new Date(sl.bedtime), 'h:mm a')} → {format(new Date(sl.wakeTime), 'h:mm a')}</p>
-                      <p className="text-xs text-slate-400">{sl.totalHours}h sleep</p>
-                    </div>
-                    <span className="text-slate-300">{'★'.repeat(sl.qualityRating)}{'☆'.repeat(5 - sl.qualityRating)}</span>
-                    <span className="text-xs text-slate-500">{format(new Date(sl.loggedAt), 'MMM d')}</span>
-                    <button onClick={() => deleteSleep.mutate(sl.id)} className="opacity-0 group-hover:opacity-100 transition-opacity text-slate-500 hover:text-red-400"><Trash2 size={16} /></button>
-                  </div>
-                ))}
-              </div>
-            )}
-          </Card>
-        </>
-      )}
-
       {/* Add Habit Modal */}
       <Modal isOpen={showModal === 'habit'} onClose={() => setShowModal(null)} title="Add New Habit">
         <div className="space-y-4">
@@ -224,6 +189,33 @@ export default function ActivityPage() {
         </div>
       </Modal>
 
+      {/* Edit Habit Modal */}
+      <Modal isOpen={!!editingHabit} onClose={() => setEditingHabit(null)} title="Edit Habit">
+        <div className="space-y-4">
+          <div><label className="block text-sm font-medium text-slate-300 mb-1.5">Habit Name</label><input value={editForm.name ?? ''} onChange={e => setEditForm(f => ({ ...f, name: e.target.value }))} className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-slate-100 focus:outline-none focus:border-blue-500" /></div>
+          <div>
+            <label className="block text-sm font-medium text-slate-300 mb-1.5">Icon</label>
+            <div className="flex flex-wrap gap-2">{EMOJI_OPTIONS.map(e => <button key={e} onClick={() => setEditForm(f => ({ ...f, icon: e }))} className={`text-xl p-2 rounded-lg border transition-colors ${editForm.icon === e ? 'border-blue-500 bg-blue-500/20' : 'border-slate-600 bg-slate-700 hover:border-slate-500'}`}>{e}</button>)}</div>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-slate-300 mb-1.5">Color</label>
+            <div className="flex gap-2">{COLOR_PRESETS.map(c => <button key={c} onClick={() => setEditForm(f => ({ ...f, color: c }))} className={`w-8 h-8 rounded-full border-2 transition-all ${editForm.color === c ? 'border-white scale-110' : 'border-transparent'}`} style={{ background: c }} />)}</div>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-slate-300 mb-1.5">Frequency</label>
+            <select value={editForm.frequency ?? 'DAILY'} onChange={e => setEditForm(f => ({ ...f, frequency: e.target.value }))} className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-slate-100 focus:outline-none focus:border-blue-500">
+              {['DAILY','WEEKLY','CUSTOM'].map(v => <option key={v} value={v}>{v}</option>)}
+            </select>
+          </div>
+          <button
+            onClick={() => editingHabit && updateHabit.mutate({ id: editingHabit.id, ...editForm })}
+            disabled={!editForm.name?.trim() || updateHabit.isPending}
+            className="w-full py-2.5 bg-blue-500 hover:bg-blue-400 disabled:opacity-50 text-white rounded-lg font-medium transition-colors">
+            {updateHabit.isPending ? 'Saving...' : 'Save Changes'}
+          </button>
+        </div>
+      </Modal>
+
       {/* Add Workout Modal */}
       <Modal isOpen={showModal === 'workout'} onClose={() => setShowModal(null)} title="Log Workout">
         <div className="space-y-4">
@@ -236,20 +228,6 @@ export default function ActivityPage() {
           ))}
           <div><label className="block text-sm font-medium text-slate-300 mb-1.5">Date</label><input type="date" value={form.loggedAt ?? format(new Date(),'yyyy-MM-dd')} onChange={e => setForm(p => ({ ...p, loggedAt: e.target.value }))} className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-slate-100 focus:outline-none focus:border-blue-500" /></div>
           <button onClick={() => addWorkout.mutate({ type: 'RUNNING', intensityLevel: 'MEDIUM', ...form })} disabled={!form.name?.trim() || !form.durationMinutes} className="w-full py-2.5 bg-blue-500 hover:bg-blue-400 disabled:opacity-50 text-white rounded-lg font-medium transition-colors">{addWorkout.isPending ? 'Logging...' : 'Log Workout'}</button>
-        </div>
-      </Modal>
-
-      {/* Add Sleep Modal */}
-      <Modal isOpen={showModal === 'sleep'} onClose={() => setShowModal(null)} title="Log Sleep">
-        <div className="space-y-4">
-          {[{ key: 'bedtime', label: 'Bedtime', type: 'datetime-local' }, { key: 'wakeTime', label: 'Wake Time', type: 'datetime-local' }].map(f => (
-            <div key={f.key}><label className="block text-sm font-medium text-slate-300 mb-1.5">{f.label}</label><input type={f.type} value={form[f.key] ?? ''} onChange={e => setForm(p => ({ ...p, [f.key]: e.target.value }))} className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-slate-100 focus:outline-none focus:border-blue-500" /></div>
-          ))}
-          <div><label className="block text-sm font-medium text-slate-300 mb-1.5">Quality (1-5 stars)</label>
-            <div className="flex gap-2">{[1,2,3,4,5].map(n => <button key={n} onClick={() => setForm(p => ({ ...p, qualityRating: String(n) }))} className={`text-2xl transition-all ${Number(form.qualityRating) >= n ? 'text-amber-400' : 'text-slate-600'}`}>★</button>)}</div>
-          </div>
-          <div><label className="block text-sm font-medium text-slate-300 mb-1.5">Notes (optional)</label><textarea value={form.notes ?? ''} onChange={e => setForm(p => ({ ...p, notes: e.target.value }))} className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-slate-100 focus:outline-none focus:border-blue-500 h-20 resize-none" /></div>
-          <button onClick={() => addSleep.mutate(form)} disabled={!form.bedtime || !form.wakeTime || !form.qualityRating} className="w-full py-2.5 bg-blue-500 hover:bg-blue-400 disabled:opacity-50 text-white rounded-lg font-medium transition-colors">{addSleep.isPending ? 'Logging...' : 'Log Sleep'}</button>
         </div>
       </Modal>
     </div>
