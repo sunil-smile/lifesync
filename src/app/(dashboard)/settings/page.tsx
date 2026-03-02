@@ -8,7 +8,7 @@ import { Header } from '@/components/layout/Header';
 import { Card } from '@/components/ui/Card';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import { useToast } from '@/components/ui/Toast';
-import { Download, Calendar, AlertTriangle, ExternalLink } from 'lucide-react';
+import { Download, Calendar, AlertTriangle, ExternalLink, Eye, EyeOff } from 'lucide-react';
 import { format } from 'date-fns';
 
 type Tab = 'profile' | 'preferences' | 'data';
@@ -20,6 +20,16 @@ export default function SettingsPage() {
   const [name, setName] = useState(session?.user?.name ?? '');
   const [bankName, setBankName] = useState('ABN AMRO');
   const [saving, setSaving] = useState(false);
+
+  // Password change state
+  const [currentPassword, setCurrentPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [passwordSaving, setPasswordSaving] = useState(false);
+  const [passwordError, setPasswordError] = useState('');
+  const [showCurrentPw, setShowCurrentPw] = useState(false);
+  const [showNewPw, setShowNewPw] = useState(false);
+  const [showConfirmPw, setShowConfirmPw] = useState(false);
 
   const { data: bankLogsData, isLoading: bankLoading } = useQuery({
     queryKey: ['bank-logs-settings'], queryFn: () => axios.get('/api/bank-upload').then(r => r.data), enabled: tab === 'data',
@@ -47,6 +57,30 @@ export default function SettingsPage() {
       URL.revokeObjectURL(url);
       toast('Data exported successfully!');
     } catch { toast('Export failed', 'error'); }
+  };
+
+  const handleChangePassword = async () => {
+    setPasswordError('');
+    if (!currentPassword || !newPassword || !confirmPassword) {
+      setPasswordError('Please fill in all password fields.'); return;
+    }
+    if (newPassword.length < 6) {
+      setPasswordError('New password must be at least 6 characters.'); return;
+    }
+    if (newPassword !== confirmPassword) {
+      setPasswordError('New passwords do not match.'); return;
+    }
+    if (!userId) return;
+    setPasswordSaving(true);
+    try {
+      await axios.put(`/api/users/${userId}`, { currentPassword, newPassword });
+      toast('Password changed successfully!');
+      setCurrentPassword(''); setNewPassword(''); setConfirmPassword('');
+    } catch (err: unknown) {
+      const msg = (err as { response?: { data?: { error?: string } } })?.response?.data?.error;
+      setPasswordError(msg ?? 'Failed to change password. Please try again.');
+    }
+    setPasswordSaving(false);
   };
 
   const bankLogs = bankLogsData ?? [];
@@ -84,7 +118,91 @@ export default function SettingsPage() {
           </Card>
 
           <Card title="Change Password">
-            <p className="text-sm text-slate-400 text-center py-4">Password changes are managed by your administrator. Contact support to reset your password.</p>
+            <div className="space-y-4">
+              {/* Current Password */}
+              <div>
+                <label className="block text-sm font-medium text-slate-300 mb-1.5">Current Password</label>
+                <div className="relative">
+                  <input
+                    type={showCurrentPw ? 'text' : 'password'}
+                    value={currentPassword}
+                    onChange={e => { setCurrentPassword(e.target.value); setPasswordError(''); }}
+                    placeholder="Enter current password"
+                    className="w-full px-3 py-2 pr-10 bg-slate-700 border border-slate-600 rounded-lg text-slate-100 placeholder-slate-500 focus:outline-none focus:border-blue-500"
+                  />
+                  <button type="button" onClick={() => setShowCurrentPw(v => !v)} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-200 transition-colors">
+                    {showCurrentPw ? <EyeOff size={16} /> : <Eye size={16} />}
+                  </button>
+                </div>
+              </div>
+
+              {/* New Password */}
+              <div>
+                <label className="block text-sm font-medium text-slate-300 mb-1.5">New Password</label>
+                <div className="relative">
+                  <input
+                    type={showNewPw ? 'text' : 'password'}
+                    value={newPassword}
+                    onChange={e => { setNewPassword(e.target.value); setPasswordError(''); }}
+                    placeholder="Min. 6 characters"
+                    className="w-full px-3 py-2 pr-10 bg-slate-700 border border-slate-600 rounded-lg text-slate-100 placeholder-slate-500 focus:outline-none focus:border-blue-500"
+                  />
+                  <button type="button" onClick={() => setShowNewPw(v => !v)} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-200 transition-colors">
+                    {showNewPw ? <EyeOff size={16} /> : <Eye size={16} />}
+                  </button>
+                </div>
+                {/* Strength indicator */}
+                {newPassword.length > 0 && (
+                  <div className="mt-1.5 flex gap-1">
+                    {[1,2,3,4].map(i => (
+                      <div key={i} className={`h-1 flex-1 rounded-full transition-colors ${
+                        newPassword.length >= i * 3
+                          ? newPassword.length < 6 ? 'bg-red-500' : newPassword.length < 10 ? 'bg-amber-500' : 'bg-emerald-500'
+                          : 'bg-slate-600'
+                      }`} />
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Confirm New Password */}
+              <div>
+                <label className="block text-sm font-medium text-slate-300 mb-1.5">Confirm New Password</label>
+                <div className="relative">
+                  <input
+                    type={showConfirmPw ? 'text' : 'password'}
+                    value={confirmPassword}
+                    onChange={e => { setConfirmPassword(e.target.value); setPasswordError(''); }}
+                    placeholder="Re-enter new password"
+                    className={`w-full px-3 py-2 pr-10 bg-slate-700 border rounded-lg text-slate-100 placeholder-slate-500 focus:outline-none focus:border-blue-500 ${
+                      confirmPassword.length > 0 && confirmPassword !== newPassword ? 'border-red-500' : 'border-slate-600'
+                    }`}
+                  />
+                  <button type="button" onClick={() => setShowConfirmPw(v => !v)} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-200 transition-colors">
+                    {showConfirmPw ? <EyeOff size={16} /> : <Eye size={16} />}
+                  </button>
+                </div>
+                {confirmPassword.length > 0 && confirmPassword !== newPassword && (
+                  <p className="text-xs text-red-400 mt-1">Passwords do not match</p>
+                )}
+              </div>
+
+              {/* Error message */}
+              {passwordError && (
+                <div className="flex items-start gap-2 p-3 rounded-lg bg-red-500/10 border border-red-500/30">
+                  <AlertTriangle size={14} className="text-red-400 mt-0.5 shrink-0" />
+                  <p className="text-xs text-red-400">{passwordError}</p>
+                </div>
+              )}
+
+              <button
+                onClick={handleChangePassword}
+                disabled={passwordSaving}
+                className="w-full py-2.5 bg-slate-600 hover:bg-slate-500 disabled:opacity-50 text-white rounded-lg font-medium text-sm transition-colors"
+              >
+                {passwordSaving ? 'Updating...' : 'Update Password'}
+              </button>
+            </div>
           </Card>
         </div>
       )}
