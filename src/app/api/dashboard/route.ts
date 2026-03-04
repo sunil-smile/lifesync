@@ -41,7 +41,9 @@ export async function GET() {
   const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0);
   const todayEnd = new Date(); todayEnd.setHours(23, 59, 59, 999);
 
-  const [user, habits, allHabitLogs, expenseAgg, incomeAgg, budgetCategories, upcomingTasks, investments, recentActivity, randomQuote] = await Promise.all([
+  const sevenDaysAgo = new Date(); sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7); sevenDaysAgo.setHours(0,0,0,0);
+
+  const [user, habits, allHabitLogs, expenseAgg, incomeAgg, budgetCategories, upcomingTasks, investments, recentActivity, randomQuote, todayScreenTime, weekScreenTime] = await Promise.all([
     prisma.user.findUnique({ where: { id: userId }, select: { id: true, name: true, email: true, avatar: true, bankName: true, xp: true } }),
     prisma.habit.findMany({ where: { userId } }),
     prisma.habitLog.findMany({ where: { userId, date: { gte: todayStart, lte: todayEnd } } }),
@@ -52,6 +54,8 @@ export async function GET() {
     prisma.investment.findMany({ where: { userId } }),
     prisma.xpLog.findMany({ where: { userId }, orderBy: { createdAt: 'desc' }, take: 10 }),
     prisma.quote.findFirst({ orderBy: { createdAt: 'desc' } }),
+    prisma.screenTime.findFirst({ where: { userId, date: { gte: todayStart, lte: todayEnd } } }),
+    prisma.screenTime.findMany({ where: { userId, date: { gte: sevenDaysAgo } }, orderBy: { date: 'desc' } }),
   ]);
 
   if (!user) return NextResponse.json({ error: 'User not found' }, { status: 404 });
@@ -94,6 +98,14 @@ export async function GET() {
     color: SECTOR_COLORS[name] ?? '#94A3B8',
   }));
 
+  // Screen time productivity
+  const weekAvgTotal = weekScreenTime.length > 0 ? weekScreenTime.reduce((s, l) => s + l.totalHours, 0) / weekScreenTime.length : null;
+  const weekAvgProductive = weekScreenTime.length > 0 ? weekScreenTime.reduce((s, l) => s + l.productiveHours, 0) / weekScreenTime.length : null;
+  const todayTotal = todayScreenTime?.totalHours ?? weekAvgTotal;
+  const todayProductive = todayScreenTime?.productiveHours ?? weekAvgProductive;
+  const productivityPct = todayTotal && todayTotal > 0 ? Math.round(((todayProductive ?? 0) / todayTotal) * 100) : null;
+  const unproductiveHours = todayTotal !== null && todayProductive !== null ? Math.round((todayTotal - todayProductive) * 10) / 10 : null;
+
   return NextResponse.json({
     user: { ...user, level, levelName },
     todayHabits: { habits: habitsWithToday, completedCount, totalCount: habits.length },
@@ -102,5 +114,10 @@ export async function GET() {
     motivationSummary: { xp: user.xp, level, levelName, todayQuote: randomQuote },
     portfolioSummary: { totalValue: Math.round(totalValue * 100) / 100, totalInvested: Math.round(totalInvested * 100) / 100, overallReturnPct: totalInvested > 0 ? Math.round(((totalValue - totalInvested) / totalInvested) * 10000) / 100 : 0, allocationBySector },
     recentActivity,
+    screenTimeSummary: {
+      todayTotal, todayProductive, productivityPct, unproductiveHours,
+      weekAvgTotal: weekAvgTotal ? Math.round(weekAvgTotal * 10) / 10 : null,
+      isEstimate: !todayScreenTime && weekAvgTotal !== null,
+    },
   });
 }

@@ -8,10 +8,10 @@ interface ModalProps {
   onClose: () => void;
   title: string;
   children: React.ReactNode;
-  size?: 'sm' | 'md' | 'lg';
+  size?: 'sm' | 'md' | 'lg' | 'xl';
 }
 
-const sizeMap = { sm: 'max-w-[448px]', md: 'max-w-[560px]', lg: 'max-w-[720px]' };
+const sizeMap = { sm: 'max-w-[448px]', md: 'max-w-[560px]', lg: 'max-w-[720px]', xl: 'max-w-[1040px]' };
 
 export function Modal({ isOpen, onClose, title, children, size = 'md' }: ModalProps) {
   const handleKeyDown = useCallback((e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); }, [onClose]);

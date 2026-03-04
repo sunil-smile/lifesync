@@ -42,10 +42,14 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'transactions must be a non-empty array' }, { status: 400 });
 
   const paidBy = PAID_BY_MAP[accountType as AccountType];
-  const parsedDateFrom = new Date(dateFrom);
-  const parsedDateTo = new Date(dateTo);
+  const parsedDateFrom = dateFrom ? new Date(dateFrom) : new Date();
+  const parsedDateTo = dateTo ? new Date(dateTo) : new Date();
 
-  const expenseData = transactions.map((tx: Record<string, unknown>) => ({
+  // Split into credits (income) and debits (expenses)
+  const debits = transactions.filter((tx: Record<string, unknown>) => tx.type !== 'credit');
+  const credits = transactions.filter((tx: Record<string, unknown>) => tx.type === 'credit');
+
+  const expenseData = debits.map((tx: Record<string, unknown>) => ({
     userId,
     amount: tx.amount as number,
     category: String(tx.category ?? 'Other'),
@@ -53,10 +57,21 @@ export async function POST(request: NextRequest) {
     date: tx.date ? new Date(tx.date as string) : new Date(),
     paidBy,
     bankAccount: accountType as string,
-    notes: tx.notes ? String(tx.notes) : null,
+    notes: tx.isFixed ? 'fixed' : null,
   }));
 
-  const [uploadLog] = await prisma.$transaction([
+  const incomeData = credits.map((tx: Record<string, unknown>) => ({
+    userId,
+    amount: tx.amount as number,
+    source: String(tx.description ?? 'Bank credit'),
+    category: String(tx.incomeCategory ?? 'Other'),
+    date: tx.date ? new Date(tx.date as string) : new Date(),
+    receivedBy: paidBy === 'shared' ? 'sunil' : paidBy,
+    recurring: !!tx.isFixed,
+    notes: null,
+  }));
+
+  const ops = [
     prisma.bankUploadLog.create({
       data: {
         userId, accountType, uploadedAt: new Date(),
@@ -65,7 +80,16 @@ export async function POST(request: NextRequest) {
       },
     }),
     ...expenseData.map((d) => prisma.expense.create({ data: d })),
-  ]);
+    ...incomeData.map((d) => prisma.income.create({ data: d })),
+  ];
 
-  return NextResponse.json({ inserted: transactions.length, logId: uploadLog.id }, { status: 201 });
+  const results = await prisma.$transaction(ops);
+  const uploadLog = results[0] as { id: string };
+
+  return NextResponse.json({
+    inserted: transactions.length,
+    expenses: debits.length,
+    income: credits.length,
+    logId: uploadLog.id,
+  }, { status: 201 });
 }

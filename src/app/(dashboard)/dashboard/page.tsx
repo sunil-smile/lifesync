@@ -9,7 +9,7 @@ import { Badge } from '@/components/ui/Badge';
 import { StatCard } from '@/components/ui/StatCard';
 import { ProgressBar } from '@/components/ui/ProgressBar';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
-import { CheckCircle2, Circle, Flame, Zap, DollarSign, CheckSquare, TrendingUp, Calendar, Star, AlertTriangle } from 'lucide-react';
+import { CheckCircle2, Circle, Flame, Zap, DollarSign, CheckSquare, TrendingUp, Calendar, Star, AlertTriangle, Monitor, Activity } from 'lucide-react';
 import { format } from 'date-fns';
 
 function getGreeting() {
@@ -34,7 +34,7 @@ export default function DashboardPage() {
   if (isLoading) return <div className="flex items-center justify-center h-full"><LoadingSpinner size="lg" /></div>;
   if (!data) return null;
 
-  const { user, todayHabits, financeSnapshot, upcomingTasks, motivationSummary, portfolioSummary, recentActivity } = data;
+  const { user, todayHabits, financeSnapshot, upcomingTasks, motivationSummary, portfolioSummary, recentActivity, screenTimeSummary } = data;
 
   const NEXT_LEVEL_XP = [0, 100, 250, 500, 900, 1400, 2100, 3000, 4200, 6000];
   const lvl = (motivationSummary?.level ?? 1) - 1;
@@ -73,6 +73,57 @@ export default function DashboardPage() {
         <StatCard title="Active Tasks" value={upcomingTasks?.length ?? 0} icon={<CheckSquare size={18} />} color="blue" />
         <StatCard title="Portfolio" value={formatCurrency(portfolioSummary?.totalValue ?? 0)} icon={<TrendingUp size={18} />} color="violet" />
       </div>
+
+      {/* Screen Time Productivity Widget */}
+      {(screenTimeSummary?.todayTotal !== null && screenTimeSummary?.todayTotal !== undefined) && (
+        <Card>
+          <div className="flex items-center justify-between flex-wrap gap-4">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-slate-700 flex items-center justify-center flex-shrink-0">
+                <Monitor size={18} className="text-blue-400" />
+              </div>
+              <div>
+                <p className="text-sm font-semibold text-slate-200">Screen Time Today</p>
+                <p className="text-xs text-slate-500">
+                  {screenTimeSummary.isEstimate ? 'Based on 7-day average (no entry today)' : 'Logged today'}
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center gap-6 flex-wrap">
+              <div className="text-center">
+                <p className="text-lg font-bold text-slate-100">{screenTimeSummary.todayTotal?.toFixed(1)}h</p>
+                <p className="text-[11px] text-slate-500">Total</p>
+              </div>
+              <div className="text-center">
+                <p className="text-lg font-bold text-emerald-400">{(screenTimeSummary.todayProductive ?? 0).toFixed(1)}h</p>
+                <p className="text-[11px] text-slate-500">Productive</p>
+              </div>
+              <div className="text-center">
+                <p className="text-lg font-bold text-red-400">{(screenTimeSummary.unproductiveHours ?? 0).toFixed(1)}h</p>
+                <p className="text-[11px] text-slate-500">Wasted</p>
+              </div>
+              {/* Productivity bar */}
+              <div className="flex flex-col gap-1 min-w-[120px]">
+                <div className="flex items-center justify-between mb-0.5">
+                  <span className="text-[11px] text-slate-400 flex items-center gap-1"><Activity size={10} />Productivity</span>
+                  <span className={`text-sm font-bold ${(screenTimeSummary.productivityPct ?? 0) >= 60 ? 'text-emerald-400' : (screenTimeSummary.productivityPct ?? 0) >= 40 ? 'text-amber-400' : 'text-red-400'}`}>
+                    {screenTimeSummary.productivityPct ?? 0}%
+                  </span>
+                </div>
+                <div className="h-2 bg-slate-700 rounded-full overflow-hidden">
+                  <div
+                    className={`h-full rounded-full transition-all ${(screenTimeSummary.productivityPct ?? 0) >= 60 ? 'bg-emerald-500' : (screenTimeSummary.productivityPct ?? 0) >= 40 ? 'bg-amber-500' : 'bg-red-500'}`}
+                    style={{ width: `${Math.min(screenTimeSummary.productivityPct ?? 0, 100)}%` }}
+                  />
+                </div>
+                <p className="text-[10px] text-slate-500 text-right">
+                  {(screenTimeSummary.productivityPct ?? 0) >= 60 ? 'On track 🎯' : (screenTimeSummary.productivityPct ?? 0) >= 40 ? 'Could improve 📈' : 'High distraction ⚠️'}
+                </p>
+              </div>
+            </div>
+          </div>
+        </Card>
+      )}
 
       {/* Main grid */}
       <div className="grid lg:grid-cols-2 gap-6">

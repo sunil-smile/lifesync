@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect } from 'react';
 import { useSession, signOut } from 'next-auth/react';
-import { Upload, ChevronDown, LogOut, User, ChevronRight } from 'lucide-react';
+import { ChevronDown, LogOut, User, ChevronRight } from 'lucide-react';
 import Link from 'next/link';
 
 type ViewMode = 'my' | 'family';
@@ -65,11 +65,6 @@ export function Header({ title, subtitle }: HeaderProps) {
             </div>
           )}
         </div>
-
-        {/* Bank Upload */}
-        <Link href="/finance#upload" className="flex items-center gap-2 px-3 py-2 rounded-lg bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 text-sm font-medium transition-colors border border-amber-500/20">
-          <Upload size={15} /><span className="hidden sm:inline">Upload Bank</span>
-        </Link>
 
         {/* User Avatar */}
         <div className="relative" ref={userRef}>

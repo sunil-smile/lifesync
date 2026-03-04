@@ -10,10 +10,10 @@ import { Badge } from '@/components/ui/Badge';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import { useToast } from '@/components/ui/Toast';
-import { Plus, Trash2, Activity, Dumbbell, Pencil } from 'lucide-react';
+import { Plus, Trash2, Activity, Dumbbell, Pencil, Monitor, CheckCircle2, Circle, Clock, Zap } from 'lucide-react';
 import { format, subDays } from 'date-fns';
 
-type Tab = 'habits' | 'workouts';
+type Tab = 'habits' | 'workouts' | 'screen-time';
 
 const EMOJI_OPTIONS = ['💪','🏃','🧘','📚','💤','🥗','💧','🎯','✍️','🎵','🧠','🌅','🚴','🏊','🥗','☕','🌿','⏰','📱','🏋️'];
 const COLOR_PRESETS = ['#3B82F6','#8B5CF6','#10B981','#F59E0B','#EF4444','#06B6D4'];
@@ -21,7 +21,16 @@ const WORKOUT_TYPES = ['RUNNING','GYM','YOGA','CYCLING','SWIMMING','OTHER'];
 const WORKOUT_EMOJI: Record<string, string> = { RUNNING: '🏃', GYM: '🏋️', YOGA: '🧘', CYCLING: '🚴', SWIMMING: '🏊', OTHER: '💪' };
 const INTENSITY_LEVELS = ['LOW','MEDIUM','HIGH'];
 
+const FREQUENCY_GROUPS: { key: string; label: string; color: string; borderColor: string; icon: string }[] = [
+  { key: 'DAILY',    label: 'Daily',     color: 'bg-blue-500/10',    borderColor: 'border-blue-500/30',    icon: '🌅' },
+  { key: 'WEEKLY',   label: 'Weekly',    color: 'bg-purple-500/10',  borderColor: 'border-purple-500/30',  icon: '📅' },
+  { key: 'BIWEEKLY', label: 'Bi-weekly', color: 'bg-emerald-500/10', borderColor: 'border-emerald-500/30', icon: '🔄' },
+  { key: 'MONTHLY',  label: 'Monthly',   color: 'bg-amber-500/10',   borderColor: 'border-amber-500/30',   icon: '📆' },
+  { key: 'CUSTOM',   label: 'Custom',    color: 'bg-slate-700/30',   borderColor: 'border-slate-600',      icon: '⚙️' },
+];
+
 type Habit = { id: string; icon: string; name: string; color: string; frequency: string; targetDays: number };
+type ScreenLog = { id: string; date: string; totalHours: number; productiveHours: number; notes: string | null };
 
 function WeekDots({ habitId, logs }: { habitId: string; logs: { habitId: string; date: string; completed: boolean }[] }) {
   const days: Date[] = [];
@@ -42,12 +51,35 @@ function WeekDots({ habitId, logs }: { habitId: string; logs: { habitId: string;
   );
 }
 
+function HabitCard({ habit, logs, onEdit, onDelete }: { habit: Habit; logs: { habitId: string; date: string; completed: boolean }[]; onEdit: (h: Habit) => void; onDelete: (id: string) => void }) {
+  return (
+    <div className="flex items-center gap-3 p-3 rounded-xl bg-slate-800/60 hover:bg-slate-700/60 transition-colors group border border-slate-700/50">
+      <div className="w-1.5 h-8 rounded-full flex-shrink-0" style={{ background: habit.color }} />
+      <span className="text-xl flex-shrink-0">{habit.icon}</span>
+      <div className="flex-1 min-w-0">
+        <p className="font-medium text-slate-100 text-sm">{habit.name}</p>
+        <WeekDots habitId={habit.id} logs={logs} />
+      </div>
+      <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+        <button onClick={() => onEdit(habit)} className="text-slate-400 hover:text-blue-400 p-1 rounded transition-colors" title="Edit">
+          <Pencil size={13} />
+        </button>
+        <button onClick={() => onDelete(habit.id)} className="text-slate-500 hover:text-red-400 p-1 rounded transition-colors" title="Delete">
+          <Trash2 size={13} />
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export default function ActivityPage() {
   const [tab, setTab] = useState<Tab>('habits');
   const [showModal, setShowModal] = useState<string | null>(null);
   const [form, setForm] = useState<Record<string, string>>({});
   const [editingHabit, setEditingHabit] = useState<Habit | null>(null);
   const [editForm, setEditForm] = useState<Record<string, string>>({});
+  const [editingLog, setEditingLog] = useState<ScreenLog | null>(null);
+  const [stForm, setStForm] = useState({ date: format(new Date(), 'yyyy-MM-dd'), totalHours: '', productiveHours: '', notes: '' });
   const qc = useQueryClient();
   const { toast } = useToast();
 
@@ -59,6 +91,9 @@ export default function ActivityPage() {
   });
   const { data: workoutsData, isLoading: workoutsLoading } = useQuery({
     queryKey: ['workouts'], queryFn: () => axios.get('/api/workouts').then(r => r.data), enabled: tab === 'workouts',
+  });
+  const { data: screenTimeData, isLoading: screenTimeLoading } = useQuery({
+    queryKey: ['screen-time'], queryFn: () => axios.get('/api/screen-time?days=30').then(r => r.data), enabled: tab === 'screen-time',
   });
 
   const addHabit = useMutation({
@@ -85,16 +120,44 @@ export default function ActivityPage() {
     mutationFn: (id: string) => axios.delete(`/api/workouts/${id}`),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['workouts'] }); toast('Workout deleted'); },
   });
+  const saveScreenTime = useMutation({
+    mutationFn: (d: typeof stForm) => axios.post('/api/screen-time', { ...d, totalHours: parseFloat(d.totalHours), productiveHours: parseFloat(d.productiveHours || '0') }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['screen-time'] }); setStForm({ date: format(new Date(), 'yyyy-MM-dd'), totalHours: '', productiveHours: '', notes: '' }); toast('Screen time logged! 🖥️'); },
+    onError: () => toast('Failed to log screen time', 'error'),
+  });
+  const updateScreenTime = useMutation({
+    mutationFn: ({ id, ...d }: { id: string; totalHours: number; productiveHours: number; notes: string }) => axios.put(`/api/screen-time/${id}`, d),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['screen-time'] }); setEditingLog(null); toast('Updated!'); },
+    onError: () => toast('Failed to update', 'error'),
+  });
+  const deleteScreenTime = useMutation({
+    mutationFn: (id: string) => axios.delete(`/api/screen-time/${id}`),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['screen-time'] }); toast('Deleted'); },
+  });
 
   const habits: Habit[] = habitsData?.habits ?? [];
   const logs = logsData?.logs ?? [];
   const workouts = workoutsData?.workouts ?? [];
+  const screenLogs: ScreenLog[] = screenTimeData?.logs ?? [];
+  const weekAvgTotal: number | null = screenTimeData?.weekAvgTotal ?? null;
+  const weekAvgProductive: number | null = screenTimeData?.weekAvgProductive ?? null;
 
-  const openModal = (type: string) => { setForm({}); setShowModal(type); };
+  const openModal = (type: string, defaultFreq?: string) => {
+    setForm(defaultFreq ? { frequency: defaultFreq } : {});
+    setShowModal(type);
+  };
   const openEditHabit = (habit: Habit) => {
     setEditingHabit(habit);
     setEditForm({ name: habit.name, icon: habit.icon, color: habit.color, frequency: habit.frequency, targetDays: String(habit.targetDays) });
   };
+
+  // Group habits by frequency
+  const habitsByFreq: Record<string, Habit[]> = {};
+  for (const h of habits) {
+    const key = h.frequency ?? 'CUSTOM';
+    if (!habitsByFreq[key]) habitsByFreq[key] = [];
+    habitsByFreq[key].push(h);
+  }
 
   return (
     <div className="p-6 space-y-6">
@@ -102,43 +165,59 @@ export default function ActivityPage() {
 
       {/* Tabs */}
       <div className="flex gap-1 p-1 bg-slate-800 rounded-xl border border-slate-700 w-fit">
-        {(['habits','workouts'] as Tab[]).map(t => (
-          <button key={t} onClick={() => setTab(t)}
-            className={`px-4 py-2 rounded-lg text-sm font-medium capitalize transition-colors ${tab === t ? 'bg-blue-500 text-white shadow-sm' : 'text-slate-400 hover:text-slate-100'}`}>
-            {t === 'habits' ? '🎯 Habits' : '💪 Workouts'}
+        {[
+          { key: 'habits', label: '🎯 Habits' },
+          { key: 'workouts', label: '💪 Workouts' },
+          { key: 'screen-time', label: '🖥️ Screen Time' },
+        ].map(t => (
+          <button key={t.key} onClick={() => setTab(t.key as Tab)}
+            className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${tab === t.key ? 'bg-blue-500 text-white shadow-sm' : 'text-slate-400 hover:text-slate-100'}`}>
+            {t.label}
           </button>
         ))}
       </div>
 
-      {/* HABITS */}
+      {/* HABITS — grouped by frequency */}
       {tab === 'habits' && (
-        <Card title="My Habits" action={<button onClick={() => openModal('habit')} className="flex items-center gap-1.5 text-sm bg-blue-500 hover:bg-blue-400 text-white px-3 py-1.5 rounded-lg font-medium transition-colors"><Plus size={14} />Add Habit</button>}>
-          {habitsLoading ? <LoadingSpinner className="py-8" /> : habits.length === 0 ? (
-            <EmptyState icon={<Activity size={24} />} title="No habits yet" description="Start building consistent habits to earn XP and track your progress." action={{ label: 'Add First Habit', onClick: () => openModal('habit') }} />
-          ) : (
-            <div className="space-y-3">
-              {habits.map((habit) => (
-                <div key={habit.id} className="flex items-center gap-4 p-4 rounded-xl bg-slate-700/50 hover:bg-slate-700 transition-colors group">
-                  <div className="w-2 h-8 rounded-full flex-shrink-0" style={{ background: habit.color }} />
-                  <span className="text-2xl flex-shrink-0">{habit.icon}</span>
-                  <div className="flex-1 min-w-0">
-                    <p className="font-medium text-slate-100">{habit.name}</p>
-                    <p className="text-xs text-slate-400 capitalize">{habit.frequency.toLowerCase()}</p>
-                  </div>
-                  <WeekDots habitId={habit.id} logs={logs} />
-                  <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                    <button onClick={() => openEditHabit(habit)} className="text-slate-400 hover:text-blue-400 p-1 rounded transition-colors" title="Edit habit">
-                      <Pencil size={15} />
-                    </button>
-                    <button onClick={() => deleteHabit.mutate(habit.id)} className="text-slate-500 hover:text-red-400 p-1 rounded transition-colors" title="Delete habit">
-                      <Trash2 size={15} />
+        habitsLoading ? <LoadingSpinner className="py-8" /> : (
+          <div className="space-y-4">
+            {FREQUENCY_GROUPS.map(group => {
+              const groupHabits = habitsByFreq[group.key] ?? [];
+              return (
+                <div key={group.key} className={`rounded-xl border ${group.borderColor} ${group.color} p-4`}>
+                  {/* Group header */}
+                  <div className="flex items-center justify-between mb-3">
+                    <div className="flex items-center gap-2">
+                      <span className="text-base">{group.icon}</span>
+                      <h3 className="text-sm font-semibold text-slate-200">{group.label}</h3>
+                      <span className="text-xs text-slate-500 bg-slate-700/60 px-2 py-0.5 rounded-full">{groupHabits.length}</span>
+                    </div>
+                    <button
+                      onClick={() => openModal('habit', group.key)}
+                      className="flex items-center gap-1 text-xs text-slate-400 hover:text-slate-100 bg-slate-700/60 hover:bg-slate-700 px-2.5 py-1 rounded-lg transition-colors">
+                      <Plus size={12} /> Add
                     </button>
                   </div>
+                  {/* Habit cards */}
+                  {groupHabits.length === 0 ? (
+                    <p className="text-xs text-slate-500 italic text-center py-3">No {group.label.toLowerCase()} habits yet</p>
+                  ) : (
+                    <div className="space-y-2">
+                      {groupHabits.map(habit => (
+                        <HabitCard key={habit.id} habit={habit} logs={logs}
+                          onEdit={openEditHabit} onDelete={id => deleteHabit.mutate(id)} />
+                      ))}
+                    </div>
+                  )}
                 </div>
-              ))}
-            </div>
-          )}
-        </Card>
+              );
+            })}
+            {/* If user has no habits at all */}
+            {habits.length === 0 && (
+              <EmptyState icon={<Activity size={24} />} title="No habits yet" description="Start building consistent habits to earn XP and track your progress." action={{ label: 'Add First Habit', onClick: () => openModal('habit') }} />
+            )}
+          </div>
+        )
       )}
 
       {/* WORKOUTS */}
@@ -165,6 +244,106 @@ export default function ActivityPage() {
         </Card>
       )}
 
+      {/* SCREEN TIME */}
+      {tab === 'screen-time' && (
+        <div className="space-y-6">
+          {/* Weekly overview */}
+          {(weekAvgTotal !== null || screenLogs.length > 0) && (
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+              {[
+                { label: 'Avg Daily Total', value: weekAvgTotal !== null ? `${weekAvgTotal.toFixed(1)}h` : '—', icon: <Clock size={16} className="text-blue-400" />, color: 'text-blue-400' },
+                { label: 'Avg Productive', value: weekAvgProductive !== null ? `${weekAvgProductive.toFixed(1)}h` : '—', icon: <CheckCircle2 size={16} className="text-emerald-400" />, color: 'text-emerald-400' },
+                { label: 'Productivity Rate', value: (weekAvgTotal && weekAvgProductive) ? `${Math.round((weekAvgProductive / weekAvgTotal) * 100)}%` : '—', icon: <Zap size={16} className="text-amber-400" />, color: 'text-amber-400' },
+                { label: 'Avg Unproductive', value: (weekAvgTotal !== null && weekAvgProductive !== null) ? `${(weekAvgTotal - weekAvgProductive).toFixed(1)}h` : '—', icon: <Circle size={16} className="text-red-400" />, color: 'text-red-400' },
+              ].map(s => (
+                <div key={s.label} className="bg-slate-800 rounded-xl border border-slate-700 p-4">
+                  <div className="flex items-center gap-2 mb-1">{s.icon}<span className="text-xs text-slate-400">{s.label}</span></div>
+                  <p className={`text-xl font-bold ${s.color}`}>{s.value}</p>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Log form */}
+          <Card title="Log Screen Time">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-xs font-medium text-slate-400 mb-1">Date</label>
+                <input type="date" value={stForm.date}
+                  onChange={e => setStForm(f => ({ ...f, date: e.target.value }))}
+                  className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-slate-100 text-sm focus:outline-none focus:border-blue-500" />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-400 mb-1">Total Hours</label>
+                <input type="number" step="0.5" min="0" max="24" value={stForm.totalHours} placeholder="e.g. 8"
+                  onChange={e => setStForm(f => ({ ...f, totalHours: e.target.value }))}
+                  className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-slate-100 text-sm focus:outline-none focus:border-blue-500" />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-400 mb-1">Productive Hours</label>
+                <input type="number" step="0.5" min="0" max="24" value={stForm.productiveHours} placeholder="e.g. 5"
+                  onChange={e => setStForm(f => ({ ...f, productiveHours: e.target.value }))}
+                  className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-slate-100 text-sm focus:outline-none focus:border-blue-500" />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-400 mb-1">Notes (optional)</label>
+                <input type="text" value={stForm.notes} placeholder="e.g. Work + study"
+                  onChange={e => setStForm(f => ({ ...f, notes: e.target.value }))}
+                  className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-slate-100 text-sm focus:outline-none focus:border-blue-500" />
+              </div>
+            </div>
+            <button
+              onClick={() => saveScreenTime.mutate(stForm)}
+              disabled={!stForm.totalHours || saveScreenTime.isPending}
+              className="mt-4 flex items-center gap-2 px-4 py-2 bg-blue-500 hover:bg-blue-400 disabled:opacity-50 text-white rounded-lg text-sm font-medium transition-colors">
+              <Monitor size={15} />
+              {saveScreenTime.isPending ? 'Saving...' : 'Save Log'}
+            </button>
+          </Card>
+
+          {/* History */}
+          <Card title="Recent Logs">
+            {screenTimeLoading ? <LoadingSpinner className="py-8" /> : screenLogs.length === 0 ? (
+              <EmptyState icon={<Monitor size={24} />} title="No screen time logged" description="Start tracking your daily screen time to measure productivity." />
+            ) : (
+              <div className="space-y-2">
+                {screenLogs.map(log => {
+                  const pct = log.totalHours > 0 ? Math.round((log.productiveHours / log.totalHours) * 100) : 0;
+                  const unproductive = Math.round((log.totalHours - log.productiveHours) * 10) / 10;
+                  return (
+                    <div key={log.id} className="flex items-center gap-4 p-3 rounded-xl bg-slate-700/50 hover:bg-slate-700 transition-colors group">
+                      <div className="text-center w-12 flex-shrink-0">
+                        <p className="text-xs font-semibold text-slate-200">{format(new Date(log.date), 'MMM d')}</p>
+                        <p className="text-[10px] text-slate-500">{format(new Date(log.date), 'EEE')}</p>
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        {/* Productivity bar */}
+                        <div className="flex items-center gap-2 mb-1">
+                          <div className="flex-1 h-2 bg-slate-600 rounded-full overflow-hidden">
+                            <div className="h-full bg-emerald-500 rounded-full" style={{ width: `${pct}%` }} />
+                          </div>
+                          <span className="text-xs font-medium text-slate-300">{pct}%</span>
+                        </div>
+                        <div className="flex gap-3 text-xs text-slate-400">
+                          <span><span className="text-slate-200">{log.totalHours}h</span> total</span>
+                          <span><span className="text-emerald-400">{log.productiveHours}h</span> productive</span>
+                          <span><span className="text-red-400">{unproductive}h</span> unproductive</span>
+                          {log.notes && <span className="text-slate-500 truncate">{log.notes}</span>}
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <button onClick={() => setEditingLog(log)} className="text-slate-400 hover:text-blue-400 p-1 rounded transition-colors"><Pencil size={13} /></button>
+                        <button onClick={() => deleteScreenTime.mutate(log.id)} className="text-slate-500 hover:text-red-400 p-1 rounded transition-colors"><Trash2 size={13} /></button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </Card>
+        </div>
+      )}
+
       {/* Add Habit Modal */}
       <Modal isOpen={showModal === 'habit'} onClose={() => setShowModal(null)} title="Add New Habit">
         <div className="space-y-4">
@@ -180,7 +359,7 @@ export default function ActivityPage() {
           <div>
             <label className="block text-sm font-medium text-slate-300 mb-1.5">Frequency</label>
             <select value={form.frequency ?? 'DAILY'} onChange={e => setForm(f => ({ ...f, frequency: e.target.value }))} className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-slate-100 focus:outline-none focus:border-blue-500">
-              {['DAILY','WEEKLY','CUSTOM'].map(v => <option key={v} value={v}>{v}</option>)}
+              {['DAILY','WEEKLY','BIWEEKLY','MONTHLY','CUSTOM'].map(v => <option key={v} value={v}>{v.charAt(0) + v.slice(1).toLowerCase()}</option>)}
             </select>
           </div>
           <button onClick={() => addHabit.mutate(form)} disabled={!form.name?.trim()} className="w-full py-2.5 bg-blue-500 hover:bg-blue-400 disabled:opacity-50 text-white rounded-lg font-medium transition-colors">
@@ -204,7 +383,7 @@ export default function ActivityPage() {
           <div>
             <label className="block text-sm font-medium text-slate-300 mb-1.5">Frequency</label>
             <select value={editForm.frequency ?? 'DAILY'} onChange={e => setEditForm(f => ({ ...f, frequency: e.target.value }))} className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-slate-100 focus:outline-none focus:border-blue-500">
-              {['DAILY','WEEKLY','CUSTOM'].map(v => <option key={v} value={v}>{v}</option>)}
+              {['DAILY','WEEKLY','BIWEEKLY','MONTHLY','CUSTOM'].map(v => <option key={v} value={v}>{v.charAt(0) + v.slice(1).toLowerCase()}</option>)}
             </select>
           </div>
           <button
@@ -214,6 +393,43 @@ export default function ActivityPage() {
             {updateHabit.isPending ? 'Saving...' : 'Save Changes'}
           </button>
         </div>
+      </Modal>
+
+      {/* Edit Screen Time Modal */}
+      <Modal isOpen={!!editingLog} onClose={() => setEditingLog(null)} title="Edit Screen Time">
+        {editingLog && (
+          <div className="space-y-4">
+            <div className="text-sm text-slate-400">
+              {format(new Date(editingLog.date), 'EEEE, MMMM d yyyy')}
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-slate-300 mb-1.5">Total Hours</label>
+              <input type="number" step="0.5" min="0" max="24" defaultValue={editingLog.totalHours}
+                id="edit-total" className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-slate-100 focus:outline-none focus:border-blue-500" />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-slate-300 mb-1.5">Productive Hours</label>
+              <input type="number" step="0.5" min="0" max="24" defaultValue={editingLog.productiveHours}
+                id="edit-productive" className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-slate-100 focus:outline-none focus:border-blue-500" />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-slate-300 mb-1.5">Notes</label>
+              <input type="text" defaultValue={editingLog.notes ?? ''}
+                id="edit-notes" className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-slate-100 focus:outline-none focus:border-blue-500" />
+            </div>
+            <button
+              onClick={() => {
+                const total = parseFloat((document.getElementById('edit-total') as HTMLInputElement).value);
+                const productive = parseFloat((document.getElementById('edit-productive') as HTMLInputElement).value || '0');
+                const notes = (document.getElementById('edit-notes') as HTMLInputElement).value;
+                updateScreenTime.mutate({ id: editingLog.id, totalHours: total, productiveHours: productive, notes });
+              }}
+              disabled={updateScreenTime.isPending}
+              className="w-full py-2.5 bg-blue-500 hover:bg-blue-400 disabled:opacity-50 text-white rounded-lg font-medium transition-colors">
+              {updateScreenTime.isPending ? 'Saving...' : 'Save Changes'}
+            </button>
+          </div>
+        )}
       </Modal>
 
       {/* Add Workout Modal */}
