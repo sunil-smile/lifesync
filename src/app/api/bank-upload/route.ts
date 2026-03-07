@@ -3,93 +3,109 @@ import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth';
 import { prisma } from '@/lib/prisma';
 
-type AccountType = 'ABN_AMRO' | 'ING' | 'CREDIT_CARD';
-const VALID_ACCOUNT_TYPES: AccountType[] = ['ABN_AMRO', 'ING', 'CREDIT_CARD'];
-const PAID_BY_MAP: Record<AccountType, string> = {
-  ABN_AMRO: 'sunil',
-  ING: 'vidhya',
-  CREDIT_CARD: 'shared',
-};
-
-export async function GET(_req: NextRequest) {
+export async function GET(request: NextRequest) {
   const session = await getServerSession(authOptions);
   if (!session?.user?.id) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  const userId = session.user.id;
-
-  const logs = await prisma.bankUploadLog.findMany({
-    where: { userId },
-    orderBy: { uploadedAt: 'desc' },
-  });
-
-  const latestByType = new Map<string, typeof logs[number]>();
-  for (const log of logs) {
-    if (!latestByType.has(log.accountType)) latestByType.set(log.accountType, log);
-  }
-
-  return NextResponse.json(Array.from(latestByType.values()));
+  const logs = await prisma.bankUploadLog.findMany({ orderBy: { uploadedAt: 'desc' }, take: 20 });
+  return NextResponse.json(logs);
 }
 
 export async function POST(request: NextRequest) {
   const session = await getServerSession(authOptions);
   if (!session?.user?.id) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   const userId = session.user.id;
+
   const body = await request.json();
-  const { accountType, transactions, dateFrom, dateTo } = body;
+  const { transactions, dateFrom, dateTo, overwrite } = body;
 
-  if (!VALID_ACCOUNT_TYPES.includes(accountType))
-    return NextResponse.json({ error: `accountType must be one of: ${VALID_ACCOUNT_TYPES.join(', ')}` }, { status: 400 });
   if (!Array.isArray(transactions) || transactions.length === 0)
-    return NextResponse.json({ error: 'transactions must be a non-empty array' }, { status: 400 });
+    return NextResponse.json({ error: 'No transactions provided' }, { status: 400 });
 
-  const paidBy = PAID_BY_MAP[accountType as AccountType];
-  const parsedDateFrom = dateFrom ? new Date(dateFrom) : new Date();
-  const parsedDateTo = dateTo ? new Date(dateTo) : new Date();
+  interface TxRow {
+    amount: number;
+    description: string;
+    date: string;
+    category: string;
+    expenseType?: string;
+    type: 'credit' | 'debit';
+    accountUser?: string;  // Account_user column → paidBy / receivedBy
+    accountType?: string;  // Account_Type column → bankAccount
+  }
 
-  // Split into credits (income) and debits (expenses)
-  const debits = transactions.filter((tx: Record<string, unknown>) => tx.type !== 'credit');
-  const credits = transactions.filter((tx: Record<string, unknown>) => tx.type === 'credit');
+  const rows = transactions as TxRow[];
+  const debits  = rows.filter(tx => tx.type !== 'credit');
+  const credits = rows.filter(tx => tx.type === 'credit');
 
-  const expenseData = debits.map((tx: Record<string, unknown>) => ({
-    userId,
-    amount: tx.amount as number,
-    category: String(tx.category ?? 'Other'),
-    description: String(tx.description ?? 'Bank transaction'),
-    date: tx.date ? new Date(tx.date as string) : new Date(),
-    paidBy,
-    bankAccount: accountType as string,
-    notes: tx.isFixed ? 'fixed' : null,
-  }));
+  // Map Account_user to paidBy / receivedBy label
+  const toPerson = (acctUser?: string) => {
+    if (!acctUser) return 'sunil';
+    const a = acctUser.toLowerCase();
+    if (a.includes('vidhya') || a.includes('ing')) return 'vidhya';
+    if (a.includes('shared') || a.includes('joint')) return 'shared';
+    return 'sunil';
+  };
 
-  const incomeData = credits.map((tx: Record<string, unknown>) => ({
-    userId,
-    amount: tx.amount as number,
-    source: String(tx.description ?? 'Bank credit'),
-    category: String(tx.incomeCategory ?? 'Other'),
-    date: tx.date ? new Date(tx.date as string) : new Date(),
-    receivedBy: paidBy === 'shared' ? 'sunil' : paidBy,
-    recurring: !!tx.isFixed,
-    notes: null,
-  }));
+  // If overwrite=true and date range provided, delete existing records in that window
+  if (overwrite && dateFrom && dateTo) {
+    const from = new Date(dateFrom);
+    const to   = new Date(dateTo);
+    // Extend 'to' to end of day
+    to.setHours(23, 59, 59, 999);
 
-  const ops = [
-    prisma.bankUploadLog.create({
-      data: {
-        userId, accountType, uploadedAt: new Date(),
-        transactionCount: transactions.length,
-        dateFrom: parsedDateFrom, dateTo: parsedDateTo,
-      },
-    }),
-    ...expenseData.map((d) => prisma.expense.create({ data: d })),
-    ...incomeData.map((d) => prisma.income.create({ data: d })),
-  ];
+    await prisma.$transaction([
+      prisma.expense.deleteMany({
+        where: { date: { gte: from, lte: to } },
+      }),
+      prisma.income.deleteMany({
+        where: { date: { gte: from, lte: to } },
+      }),
+    ]);
+  }
 
-  const results = await prisma.$transaction(ops);
-  const uploadLog = results[0] as { id: string };
+  // Insert all transactions
+  await prisma.$transaction([
+    ...debits.map(tx =>
+      prisma.expense.create({
+        data: {
+          userId,
+          amount:      Math.abs(tx.amount),
+          category:    tx.category || 'Other',
+          description: tx.description,
+          date:        new Date(tx.date),
+          paidBy:      toPerson(tx.accountUser),
+          bankAccount: tx.accountType ?? null,
+          expenseType: tx.expenseType ?? null,
+          isFixed:     (tx.expenseType ?? '').toLowerCase() === 'fixed',
+        },
+      })
+    ),
+    ...credits.map(tx =>
+      prisma.income.create({
+        data: {
+          userId,
+          amount:      Math.abs(tx.amount),
+          source:      tx.description,
+          category:    tx.category || 'Other',
+          date:        new Date(tx.date),
+          receivedBy:  toPerson(tx.accountUser),
+          expenseType: tx.expenseType ?? null,
+          recurring:   (tx.expenseType ?? '').toLowerCase() === 'fixed',
+        },
+      })
+    ),
+  ]);
 
-  return NextResponse.json({
-    inserted: transactions.length,
-    expenses: debits.length,
-    income: credits.length,
-    logId: uploadLog.id,
-  }, { status: 201 });
+  const accountTypes = [...new Set(rows.map(tx => tx.accountType ?? 'EXCEL'))];
+  await prisma.bankUploadLog.create({
+    data: {
+      userId,
+      accountType:      accountTypes.join(','),
+      uploadedAt:       new Date(),
+      transactionCount: transactions.length,
+      dateFrom:         dateFrom ? new Date(dateFrom) : new Date(),
+      dateTo:           dateTo   ? new Date(dateTo)   : new Date(),
+    },
+  });
+
+  return NextResponse.json({ imported: transactions.length, debits: debits.length, credits: credits.length });
 }

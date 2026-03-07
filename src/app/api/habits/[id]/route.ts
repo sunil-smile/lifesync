@@ -135,7 +135,7 @@ export async function PATCH(
     }
 
     const body = await req.json();
-    const { name, icon, color, frequency, targetDays } = body;
+    const { name, icon, color, frequency, targetDays, scheduledDays } = body;
 
     const updated = await prisma.habit.update({
       where: { id: params.id },
@@ -144,7 +144,8 @@ export async function PATCH(
         ...(icon !== undefined && { icon }),
         ...(color !== undefined && { color }),
         ...(frequency !== undefined && { frequency }),
-        ...(targetDays !== undefined && { targetDays }),
+        ...(targetDays !== undefined && { targetDays: typeof targetDays === 'number' ? targetDays : parseInt(targetDays, 10) || 1 }),
+        ...(scheduledDays !== undefined && { scheduledDays: Array.isArray(scheduledDays) ? scheduledDays : [] }),
       },
     });
 

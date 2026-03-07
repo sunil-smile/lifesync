@@ -7,24 +7,26 @@ export async function GET(request: NextRequest) {
   const session = await getServerSession(authOptions);
   if (!session?.user?.id) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-  const userId = session.user.id;
   const { searchParams } = new URL(request.url);
+  const monthParam  = searchParams.get('month');
+  const yearParam   = searchParams.get('year');
+  const dateFrom    = searchParams.get('dateFrom');
+  const dateTo      = searchParams.get('dateTo');
+  const category    = searchParams.get('category');
+  const paidBy      = searchParams.get('paidBy');
+  const limit       = parseInt(searchParams.get('limit') ?? '500', 10);
 
-  const monthParam = searchParams.get('month');
-  const yearParam = searchParams.get('year');
-  const category = searchParams.get('category');
-  const paidBy = searchParams.get('paidBy');
-  const limit = parseInt(searchParams.get('limit') ?? '50', 10);
+  const where: Record<string, unknown> = {};
 
-  const where: Record<string, unknown> = { userId };
-
-  if (monthParam && yearParam) {
+  if (dateFrom && dateTo) {
+    where.date = { gte: new Date(dateFrom), lte: new Date(dateTo) };
+  } else if (monthParam && yearParam) {
     const month = parseInt(monthParam, 10);
-    const year = parseInt(yearParam, 10);
-    where.date = { gte: new Date(year, month - 1, 1), lt: new Date(year, month, 1) };
+    const year  = parseInt(yearParam, 10);
+    where.date  = { gte: new Date(year, month - 1, 1), lt: new Date(year, month, 1) };
   }
   if (category) where.category = category;
-  if (paidBy) where.paidBy = paidBy;
+  if (paidBy)   where.paidBy   = paidBy;
 
   const expenses = await prisma.expense.findMany({
     where,
@@ -41,7 +43,7 @@ export async function POST(request: NextRequest) {
 
   const userId = session.user.id;
   const body = await request.json();
-  const { amount, category, description, date, paidBy, bankAccount, notes } = body;
+  const { amount, category, description, date, paidBy, bankAccount, expenseType, notes } = body;
 
   if (typeof amount !== 'number' || amount <= 0)
     return NextResponse.json({ error: 'amount must be a positive number' }, { status: 400 });
@@ -54,12 +56,14 @@ export async function POST(request: NextRequest) {
     data: {
       userId,
       amount,
-      category: category.trim(),
+      category:    category.trim(),
       description: description.trim(),
-      date: date ? new Date(date) : new Date(),
-      paidBy: paidBy ?? 'sunil',
+      date:        date ? new Date(date) : new Date(),
+      paidBy:      paidBy      ?? 'sunil',
       bankAccount: bankAccount ?? null,
-      notes: notes ?? null,
+      expenseType: expenseType ?? null,
+      isFixed:     (expenseType ?? '').toLowerCase() === 'fixed',
+      notes:       notes ?? null,
     },
   });
 

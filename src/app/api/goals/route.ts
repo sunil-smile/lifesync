@@ -14,7 +14,7 @@ export async function GET(request: NextRequest) {
   const assignee = searchParams.get('assignee');
   const parentGoalIdParam = searchParams.get('parentGoalId');
 
-  const where: Record<string, unknown> = { userId };
+  const where: Record<string, unknown> = {}; // Show all household data
   if (type) where.type = type;
   if (status) where.status = status;
   if (assignee) where.assignee = assignee;

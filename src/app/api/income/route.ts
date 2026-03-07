@@ -6,18 +6,22 @@ import { prisma } from '@/lib/prisma';
 export async function GET(request: NextRequest) {
   const session = await getServerSession(authOptions);
   if (!session?.user?.id) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  const userId = session.user.id;
-  const { searchParams } = new URL(request.url);
-  const monthParam = searchParams.get('month');
-  const yearParam = searchParams.get('year');
-  const category = searchParams.get('category');
-  const limit = parseInt(searchParams.get('limit') ?? '50', 10);
 
-  const where: Record<string, unknown> = { userId };
-  if (monthParam && yearParam) {
+  const { searchParams } = new URL(request.url);
+  const monthParam  = searchParams.get('month');
+  const yearParam   = searchParams.get('year');
+  const dateFrom    = searchParams.get('dateFrom');
+  const dateTo      = searchParams.get('dateTo');
+  const category    = searchParams.get('category');
+  const limit       = parseInt(searchParams.get('limit') ?? '500', 10);
+
+  const where: Record<string, unknown> = {};
+  if (dateFrom && dateTo) {
+    where.date = { gte: new Date(dateFrom), lte: new Date(dateTo) };
+  } else if (monthParam && yearParam) {
     const month = parseInt(monthParam, 10);
-    const year = parseInt(yearParam, 10);
-    where.date = { gte: new Date(year, month - 1, 1), lt: new Date(year, month, 1) };
+    const year  = parseInt(yearParam, 10);
+    where.date  = { gte: new Date(year, month - 1, 1), lt: new Date(year, month, 1) };
   }
   if (category) where.category = category;
 
@@ -30,21 +34,28 @@ export async function POST(request: NextRequest) {
   if (!session?.user?.id) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   const userId = session.user.id;
   const body = await request.json();
-  const { amount, source, category, date, receivedBy, recurring, notes } = body;
+  const { amount, source, category, date, receivedBy, recurring, expenseType, notes } = body;
 
   if (typeof amount !== 'number' || amount <= 0)
     return NextResponse.json({ error: 'amount must be a positive number' }, { status: 400 });
-  if (!source?.trim()) return NextResponse.json({ error: 'source is required' }, { status: 400 });
-  if (!category?.trim()) return NextResponse.json({ error: 'category is required' }, { status: 400 });
-  if (!receivedBy?.trim()) return NextResponse.json({ error: 'receivedBy is required' }, { status: 400 });
+  if (!source?.trim())
+    return NextResponse.json({ error: 'source is required' }, { status: 400 });
+  if (!category?.trim())
+    return NextResponse.json({ error: 'category is required' }, { status: 400 });
+  if (!receivedBy?.trim())
+    return NextResponse.json({ error: 'receivedBy is required' }, { status: 400 });
 
   const income = await prisma.income.create({
     data: {
-      userId, amount, source: source.trim(), category: category.trim(),
-      date: date ? new Date(date) : new Date(),
-      receivedBy: receivedBy.trim(),
-      recurring: recurring ?? false,
-      notes: notes ?? null,
+      userId,
+      amount,
+      source:      source.trim(),
+      category:    category.trim(),
+      date:        date ? new Date(date) : new Date(),
+      receivedBy:  receivedBy.trim(),
+      recurring:   recurring    ?? false,
+      expenseType: expenseType  ?? null,
+      notes:       notes        ?? null,
     },
   });
 

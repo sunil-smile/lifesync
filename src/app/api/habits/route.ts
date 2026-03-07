@@ -65,7 +65,7 @@ export async function GET(req: NextRequest) {
     sevenDaysAgo.setHours(0, 0, 0, 0);
 
     const habits = await prisma.habit.findMany({
-      where: { userId },
+      where: {},
       include: {
         logs: {
           where: {
@@ -92,6 +92,7 @@ export async function GET(req: NextRequest) {
         color: habit.color,
         frequency: habit.frequency,
         targetDays: habit.targetDays,
+        scheduledDays: habit.scheduledDays ?? [],
         createdAt: habit.createdAt,
         updatedAt: habit.updatedAt,
         weekDots,
@@ -115,7 +116,7 @@ export async function POST(req: NextRequest) {
 
   try {
     const body = await req.json();
-    const { name, icon, color, frequency, targetDays } = body;
+    const { name, icon, color, frequency, targetDays, scheduledDays } = body;
 
     if (!name) {
       return NextResponse.json({ error: 'name is required' }, { status: 400 });
@@ -128,7 +129,8 @@ export async function POST(req: NextRequest) {
         icon: icon ?? '✅',
         color: color ?? '#6366f1',
         frequency: frequency ?? 'DAILY',
-        targetDays: targetDays ?? [],
+        targetDays: typeof targetDays === 'number' ? targetDays : parseInt(targetDays ?? '1', 10) || 1,
+        scheduledDays: Array.isArray(scheduledDays) ? scheduledDays : [],
       },
     });
 

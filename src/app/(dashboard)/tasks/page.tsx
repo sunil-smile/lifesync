@@ -9,26 +9,32 @@ import { Badge } from '@/components/ui/Badge';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import { useToast } from '@/components/ui/Toast';
-import { Plus, Trash2, ChevronRight, CheckSquare, Calendar, Pencil, Send, RotateCcw, Clock } from 'lucide-react';
-import { format, isPast, isToday } from 'date-fns';
+import { Plus, Trash2, ChevronRight, CheckSquare, Calendar, Pencil, Send, RotateCcw, Clock, BarChart2 } from 'lucide-react';
+import { format, isPast, isToday, parseISO, differenceInDays } from 'date-fns';
 
 type TaskStatus = 'TODO' | 'IN_PROGRESS' | 'HOLD' | 'DONE';
 type Priority = 'HIGH' | 'MEDIUM' | 'LOW';
+type ViewMode = 'board' | 'timeline';
 
 interface Task {
-  id: string; title: string; notes?: string; dueDate?: string;
+  id: string; title: string; notes?: string; dueDate?: string; createdAt: string;
   priority: Priority; assignee: string; status: TaskStatus;
   goal?: { id: string; title: string };
 }
 interface TaskUpdate { id: string; text: string; createdAt: string }
 
 const STATUS_CONFIG: Record<TaskStatus, { label: string; color: string; headerColor: string; next: TaskStatus | null; nextLabel: string | null }> = {
-  TODO:        { label: 'To Do',       color: 'border-blue-500/40 bg-blue-500/5',    headerColor: 'text-blue-400',    next: 'IN_PROGRESS', nextLabel: 'Start' },
-  IN_PROGRESS: { label: 'In Progress', color: 'border-amber-500/40 bg-amber-500/5',  headerColor: 'text-amber-400',   next: 'DONE',        nextLabel: 'Complete' },
-  HOLD:        { label: 'On Hold',     color: 'border-slate-500/40 bg-slate-500/5',  headerColor: 'text-slate-400',   next: 'IN_PROGRESS', nextLabel: 'Resume' },
+  TODO:        { label: 'To Do',       color: 'border-blue-500/40 bg-blue-500/5',       headerColor: 'text-blue-400',    next: 'IN_PROGRESS', nextLabel: 'Start' },
+  IN_PROGRESS: { label: 'In Progress', color: 'border-amber-500/40 bg-amber-500/5',     headerColor: 'text-amber-400',   next: 'DONE',        nextLabel: 'Complete' },
+  HOLD:        { label: 'On Hold',     color: 'border-slate-500/40 bg-slate-500/5',     headerColor: 'text-slate-400',   next: 'IN_PROGRESS', nextLabel: 'Resume' },
   DONE:        { label: 'Done',        color: 'border-emerald-500/40 bg-emerald-500/5', headerColor: 'text-emerald-400', next: null, nextLabel: null },
 };
 const PRIORITY_VARIANT: Record<Priority, 'red' | 'amber' | 'slate'> = { HIGH: 'red', MEDIUM: 'amber', LOW: 'slate' };
+const PRIORITY_COLOR: Record<Priority, string> = {
+  HIGH: 'bg-red-500',
+  MEDIUM: 'bg-amber-500',
+  LOW: 'bg-blue-400',
+};
 const ALL_STATUSES: TaskStatus[] = ['TODO', 'IN_PROGRESS', 'HOLD', 'DONE'];
 
 function DueDateChip({ date }: { date?: string }) {
@@ -38,15 +44,142 @@ function DueDateChip({ date }: { date?: string }) {
   return <span className={`text-xs flex items-center gap-1 ${cls}`}><Calendar size={10} />{format(d, 'MMM d')}</span>;
 }
 
+// ─── Timeline View ────────────────────────────────────────────────────────────
+function TimelineView({
+  tasks,
+  filterPriority,
+}: {
+  tasks: Task[];
+  filterPriority: Priority | 'ALL';
+}) {
+  // Only tasks with both createdAt and dueDate, excluding DONE
+  const timelineTasks = tasks.filter(t =>
+    t.status !== 'DONE' &&
+    t.dueDate &&
+    (filterPriority === 'ALL' || t.priority === filterPriority)
+  );
+
+  if (timelineTasks.length === 0) {
+    return (
+      <EmptyState icon={<BarChart2 size={24} />} title="No tasks to display"
+        description="Tasks need a due date to appear in the timeline. DONE tasks are hidden." />
+    );
+  }
+
+  // Date range: today → max due date (or +30d if no tasks)
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const dueDates = timelineTasks.map(t => parseISO(t.dueDate!));
+  const createdDates = timelineTasks.map(t => parseISO(t.createdAt));
+  const rangeStart = new Date(Math.min(today.getTime(), ...createdDates.map(d => d.getTime())));
+  const rangeEnd = new Date(Math.max(today.getTime() + 1000 * 60 * 60 * 24 * 7, ...dueDates.map(d => d.getTime())));
+  const totalDays = Math.max(differenceInDays(rangeEnd, rangeStart) + 1, 1);
+
+  // Sort by due date
+  const sorted = [...timelineTasks].sort((a, b) => parseISO(a.dueDate!).getTime() - parseISO(b.dueDate!).getTime());
+
+  // Month header ticks
+  const monthTicks: { label: string; left: number }[] = [];
+  const cursor = new Date(rangeStart);
+  cursor.setDate(1);
+  while (cursor <= rangeEnd) {
+    const left = (differenceInDays(cursor, rangeStart) / totalDays) * 100;
+    if (left >= 0 && left <= 100) {
+      monthTicks.push({ label: format(cursor, 'MMM d'), left });
+    }
+    cursor.setMonth(cursor.getMonth() + 1);
+  }
+
+  // Today marker
+  const todayLeft = (differenceInDays(today, rangeStart) / totalDays) * 100;
+
+  return (
+    <div className="space-y-3">
+      {/* Timeline header */}
+      <div className="relative h-6 ml-56">
+        {/* Month ticks */}
+        {monthTicks.map((t, i) => (
+          <span key={i} className="absolute text-[10px] text-slate-500 transform -translate-x-1/2"
+            style={{ left: `${t.left}%` }}>
+            {t.label}
+          </span>
+        ))}
+        {/* Today marker label */}
+        <span className="absolute text-[10px] text-blue-400 font-semibold transform -translate-x-1/2"
+          style={{ left: `${Math.min(Math.max(todayLeft, 0), 100)}%` }}>
+          Today
+        </span>
+      </div>
+
+      {/* Task bars */}
+      <div className="space-y-2">
+        {sorted.map(task => {
+          const startDate = parseISO(task.createdAt);
+          const endDate = parseISO(task.dueDate!);
+          const isOverdue = isPast(endDate) && !isToday(endDate);
+
+          // Clamp to range
+          const startClamped = startDate < rangeStart ? rangeStart : startDate;
+          const endClamped = endDate > rangeEnd ? rangeEnd : endDate;
+
+          const leftPct = (differenceInDays(startClamped, rangeStart) / totalDays) * 100;
+          const widthPct = Math.max((differenceInDays(endClamped, startClamped) / totalDays) * 100, 1.5);
+
+          return (
+            <div key={task.id} className="flex items-center gap-2 h-9">
+              {/* Label */}
+              <div className="w-56 flex-shrink-0 flex items-center gap-2 pr-2">
+                <Badge variant={PRIORITY_VARIANT[task.priority]} size="sm">{task.priority}</Badge>
+                <span className="text-xs text-slate-200 truncate flex-1" title={task.title}>{task.title}</span>
+                {task.assignee === 'vidhya'
+                  ? <span className="w-5 h-5 rounded-full bg-violet-500 text-white text-[9px] font-bold flex items-center justify-center flex-shrink-0">V</span>
+                  : <span className="w-5 h-5 rounded-full bg-blue-500 text-white text-[9px] font-bold flex items-center justify-center flex-shrink-0">S</span>
+                }
+              </div>
+
+              {/* Bar track */}
+              <div className="flex-1 relative h-7 bg-slate-800 rounded-lg border border-slate-700 overflow-hidden">
+                {/* Today line */}
+                {todayLeft >= 0 && todayLeft <= 100 && (
+                  <div className="absolute top-0 bottom-0 w-px bg-blue-500/60 z-10"
+                    style={{ left: `${todayLeft}%` }} />
+                )}
+                {/* Task bar */}
+                <div
+                  className={`absolute top-1 bottom-1 rounded-md flex items-center px-2 text-white text-[10px] font-medium truncate z-20
+                    ${isOverdue ? 'bg-red-500/80' : PRIORITY_COLOR[task.priority]}`}
+                  style={{ left: `${leftPct}%`, width: `${widthPct}%` }}
+                  title={`${task.title}: ${format(startDate, 'MMM d')} → ${format(endDate, 'MMM d')}`}>
+                  {widthPct > 8 ? format(endDate, 'MMM d') : ''}
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Legend */}
+      <div className="flex items-center gap-4 pt-2 text-[11px] text-slate-500">
+        <span className="flex items-center gap-1.5"><span className="w-3 h-2 rounded-sm bg-red-500 inline-block" />HIGH</span>
+        <span className="flex items-center gap-1.5"><span className="w-3 h-2 rounded-sm bg-amber-500 inline-block" />MEDIUM</span>
+        <span className="flex items-center gap-1.5"><span className="w-3 h-2 rounded-sm bg-blue-400 inline-block" />LOW</span>
+        <span className="flex items-center gap-1.5"><span className="w-3 h-2 rounded-sm bg-red-500/80 inline-block" />Overdue</span>
+        <span className="flex items-center gap-1.5"><span className="w-px h-3 bg-blue-500/60 inline-block" />Today</span>
+      </div>
+    </div>
+  );
+}
+
+// ─── Main Page ────────────────────────────────────────────────────────────────
 export default function TasksPage() {
   const qc = useQueryClient();
   const { toast } = useToast();
+  const [viewMode, setViewMode] = useState<ViewMode>('board');
   const [filterStatus, setFilterStatus] = useState<TaskStatus | 'ALL'>('ALL');
   const [filterPriority, setFilterPriority] = useState<Priority | 'ALL'>('ALL');
   const [filterAssignee, setFilterAssignee] = useState<'ALL' | 'sunil' | 'vidhya'>('ALL');
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [createForm, setCreateForm] = useState<Record<string, string>>({});
-  // Edit / detail modal
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
   const [editForm, setEditForm] = useState<Record<string, string>>({});
   const [updateText, setUpdateText] = useState('');
@@ -54,14 +187,17 @@ export default function TasksPage() {
   const { data, isLoading } = useQuery({
     queryKey: ['tasks', filterStatus, filterPriority, filterAssignee],
     queryFn: () => {
-      const params = new URLSearchParams({ limit: '100' });
+      const params = new URLSearchParams({ limit: '200' });
       if (filterStatus !== 'ALL') params.set('status', filterStatus);
       if (filterPriority !== 'ALL') params.set('priority', filterPriority);
       if (filterAssignee !== 'ALL') params.set('assignee', filterAssignee);
       return axios.get(`/api/tasks?${params}`).then(r => r.data);
     },
   });
-  const { data: goalsData } = useQuery({ queryKey: ['goals-minimal'], queryFn: () => axios.get('/api/goals').then(r => r.data) });
+  const { data: goalsData } = useQuery({
+    queryKey: ['goals-minimal'],
+    queryFn: () => axios.get('/api/goals').then(r => r.data),
+  });
   const { data: updatesData, isLoading: updatesLoading } = useQuery({
     queryKey: ['task-updates', selectedTask?.id],
     queryFn: () => axios.get(`/api/tasks/${selectedTask!.id}/updates`).then(r => r.data),
@@ -87,7 +223,8 @@ export default function TasksPage() {
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['tasks'] }); setSelectedTask(null); toast('Task deleted'); },
   });
   const postUpdate = useMutation({
-    mutationFn: ({ taskId, text }: { taskId: string; text: string }) => axios.post(`/api/tasks/${taskId}/updates`, { text }),
+    mutationFn: ({ taskId, text }: { taskId: string; text: string }) =>
+      axios.post(`/api/tasks/${taskId}/updates`, { text }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['task-updates', selectedTask?.id] });
       setUpdateText('');
@@ -124,90 +261,156 @@ export default function TasksPage() {
     <div className="p-6 space-y-6">
       <Header title="Tasks" />
 
-      {/* Filters */}
+      {/* Filters + View Toggle */}
       <div className="flex flex-wrap gap-3 items-center justify-between">
-        <div className="flex gap-2 flex-wrap">
-          {(['ALL', ...ALL_STATUSES] as const).map(s => (
+        <div className="flex gap-2 flex-wrap items-center">
+          {/* View mode toggle */}
+          <div className="flex gap-1 p-1 bg-slate-800 rounded-lg border border-slate-700">
+            <button onClick={() => setViewMode('board')}
+              className={`px-3 py-1 rounded-md text-xs font-medium transition-colors
+                ${viewMode === 'board' ? 'bg-blue-500 text-white' : 'text-slate-400 hover:text-slate-100'}`}>
+              Board
+            </button>
+            <button onClick={() => setViewMode('timeline')}
+              className={`px-3 py-1 rounded-md text-xs font-medium transition-colors flex items-center gap-1
+                ${viewMode === 'timeline' ? 'bg-blue-500 text-white' : 'text-slate-400 hover:text-slate-100'}`}>
+              <BarChart2 size={11} />Timeline
+            </button>
+          </div>
+
+          {/* Status filter (board only) */}
+          {viewMode === 'board' && (['ALL', ...ALL_STATUSES] as const).map(s => (
             <button key={s} onClick={() => setFilterStatus(s)}
-              className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${filterStatus === s ? 'bg-blue-500 text-white' : 'bg-slate-800 text-slate-400 hover:text-slate-100 border border-slate-700'}`}>
+              className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors
+                ${filterStatus === s ? 'bg-blue-500 text-white' : 'bg-slate-800 text-slate-400 hover:text-slate-100 border border-slate-700'}`}>
               {s === 'ALL' ? 'All' : s === 'IN_PROGRESS' ? 'In Progress' : s === 'HOLD' ? 'On Hold' : s.charAt(0) + s.slice(1).toLowerCase()}
             </button>
           ))}
+
+          {/* Priority filter */}
+          <select value={filterPriority} onChange={e => setFilterPriority(e.target.value as Priority | 'ALL')}
+            className="px-3 py-1.5 bg-slate-800 border border-slate-700 rounded-lg text-slate-400 text-sm focus:outline-none focus:border-blue-500">
+            <option value="ALL">All priorities</option>
+            {(['HIGH','MEDIUM','LOW'] as Priority[]).map(p => <option key={p} value={p}>{p}</option>)}
+          </select>
+
+          {/* Assignee filter */}
+          <select value={filterAssignee} onChange={e => setFilterAssignee(e.target.value as 'ALL' | 'sunil' | 'vidhya')}
+            className="px-3 py-1.5 bg-slate-800 border border-slate-700 rounded-lg text-slate-400 text-sm focus:outline-none focus:border-blue-500">
+            <option value="ALL">All assignees</option>
+            <option value="sunil">Sunil</option>
+            <option value="vidhya">Vidhya</option>
+          </select>
         </div>
-        <button onClick={() => { setCreateForm({}); setShowCreateModal(true); }} className="flex items-center gap-1.5 text-sm bg-blue-500 hover:bg-blue-400 text-white px-3 py-2 rounded-lg font-medium transition-colors">
+
+        <button onClick={() => { setCreateForm({}); setShowCreateModal(true); }}
+          className="flex items-center gap-1.5 text-sm bg-blue-500 hover:bg-blue-400 text-white px-3 py-2 rounded-lg font-medium transition-colors">
           <Plus size={14} />Add Task
         </button>
       </div>
 
-      {/* Kanban Board */}
-      {isLoading ? <LoadingSpinner className="py-12" /> : (
-        <div className="grid grid-cols-2 xl:grid-cols-4 gap-4">
-          {ALL_STATUSES.map(status => {
-            const { label, color, headerColor, next, nextLabel } = STATUS_CONFIG[status];
-            const col = byStatus(status);
-            return (
-              <div key={status} className={`rounded-xl border p-4 space-y-3 ${color}`}>
-                <div className="flex items-center justify-between">
-                  <h3 className={`font-semibold text-sm ${headerColor}`}>{label}</h3>
-                  <span className="text-xs text-slate-500 bg-slate-700/60 px-2 py-0.5 rounded-full">{col.length}</span>
-                </div>
-                {col.length === 0
-                  ? <p className="text-xs text-slate-500 text-center py-4">No tasks here</p>
-                  : col.map(task => (
-                    <div key={task.id} className="bg-slate-800 rounded-lg p-3 border border-slate-700 hover:border-slate-600 transition-colors group space-y-2">
-                      <div className="flex items-start gap-2">
-                        <Badge variant={PRIORITY_VARIANT[task.priority]} size="sm">{task.priority}</Badge>
-                        <p className="text-sm text-slate-200 font-medium flex-1 leading-snug">{task.title}</p>
-                      </div>
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-2">
-                          <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold text-white ${task.assignee === 'vidhya' ? 'bg-violet-500' : 'bg-blue-500'}`}>
-                            {task.assignee === 'vidhya' ? 'V' : 'S'}
+      {/* ── BOARD VIEW ── */}
+      {viewMode === 'board' && (
+        isLoading ? <LoadingSpinner className="py-12" /> : (
+          <div className="grid grid-cols-2 xl:grid-cols-4 gap-4">
+            {ALL_STATUSES.map(status => {
+              const { label, color, headerColor, next, nextLabel } = STATUS_CONFIG[status];
+              const col = byStatus(status);
+              return (
+                <div key={status} className={`rounded-xl border p-4 space-y-3 ${color}`}>
+                  <div className="flex items-center justify-between">
+                    <h3 className={`font-semibold text-sm ${headerColor}`}>{label}</h3>
+                    <span className="text-xs text-slate-500 bg-slate-700/60 px-2 py-0.5 rounded-full">{col.length}</span>
+                  </div>
+                  {col.length === 0
+                    ? <p className="text-xs text-slate-500 text-center py-4">No tasks here</p>
+                    : col.map(task => (
+                      <div key={task.id} className={`rounded-lg p-3 border transition-colors group space-y-2 ${
+                          task.status !== 'DONE' && task.dueDate && isPast(new Date(task.dueDate)) && !isToday(new Date(task.dueDate))
+                            ? 'bg-red-950/30 border-red-500/40 hover:border-red-400/60'
+                            : 'bg-slate-800 border-slate-700 hover:border-slate-600'
+                        }`}>
+                        <div className="flex items-start gap-2">
+                          <Badge variant={PRIORITY_VARIANT[task.priority]} size="sm">{task.priority}</Badge>
+                          <p className="text-sm text-slate-200 font-medium flex-1 leading-snug">{task.title}</p>
+                        </div>
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold text-white ${task.assignee === 'vidhya' ? 'bg-violet-500' : 'bg-blue-500'}`}>
+                              {task.assignee === 'vidhya' ? 'V' : 'S'}
+                            </div>
+                            <DueDateChip date={task.dueDate} />
                           </div>
-                          <DueDateChip date={task.dueDate} />
+                          <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                            <button onClick={() => openEdit(task)} title="Edit / View updates"
+                              className="text-slate-400 hover:text-blue-400 p-0.5"><Pencil size={13} /></button>
+                            {next && (
+                              <button onClick={() => updateTask.mutate({ id: task.id, status: next })} title={nextLabel ?? ''}
+                                className="text-slate-400 hover:text-emerald-400 p-0.5">
+                                {status === 'HOLD' ? <RotateCcw size={13} /> : <ChevronRight size={14} />}
+                              </button>
+                            )}
+                            <button onClick={() => deleteTask.mutate(task.id)}
+                              className="text-slate-500 hover:text-red-400 p-0.5"><Trash2 size={13} /></button>
+                          </div>
                         </div>
-                        <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                          <button onClick={() => openEdit(task)} title="Edit / View updates" className="text-slate-400 hover:text-blue-400 p-0.5"><Pencil size={13} /></button>
-                          {next && (
-                            <button onClick={() => updateTask.mutate({ id: task.id, status: next })} title={nextLabel ?? ''} className="text-slate-400 hover:text-emerald-400 p-0.5">
-                              {status === 'HOLD' ? <RotateCcw size={13} /> : <ChevronRight size={14} />}
-                            </button>
-                          )}
-                          <button onClick={() => deleteTask.mutate(task.id)} className="text-slate-500 hover:text-red-400 p-0.5"><Trash2 size={13} /></button>
-                        </div>
+                        {task.goal && <p className="text-xs text-slate-500 truncate">🎯 {task.goal.title}</p>}
                       </div>
-                      {task.goal && <p className="text-xs text-slate-500 truncate">🎯 {task.goal.title}</p>}
-                    </div>
-                  ))}
-              </div>
-            );
-          })}
-        </div>
+                    ))}
+                </div>
+              );
+            })}
+          </div>
+        )
+      )}
+
+      {/* ── TIMELINE VIEW ── */}
+      {viewMode === 'timeline' && (
+        isLoading ? <LoadingSpinner className="py-12" /> : (
+          <div className="bg-slate-800/50 rounded-xl border border-slate-700 p-6 overflow-x-auto">
+            <TimelineView tasks={tasks} filterPriority={filterPriority} />
+          </div>
+        )
       )}
 
       {/* Create Task Modal */}
       <Modal isOpen={showCreateModal} onClose={() => setShowCreateModal(false)} title="Add Task">
         <div className="space-y-4">
-          <div><label className="block text-sm font-medium text-slate-300 mb-1.5">Task Title *</label><input value={createForm.title ?? ''} onChange={e => setCreateForm(p => ({ ...p, title: e.target.value }))} className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-slate-100 focus:outline-none focus:border-blue-500" placeholder="What needs to be done?" /></div>
-          <div><label className="block text-sm font-medium text-slate-300 mb-1.5">Notes</label><textarea value={createForm.notes ?? ''} onChange={e => setCreateForm(p => ({ ...p, notes: e.target.value }))} className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-slate-100 focus:outline-none focus:border-blue-500 h-20 resize-none" /></div>
+          <div><label className="block text-sm font-medium text-slate-300 mb-1.5">Task Title *</label>
+            <input value={createForm.title ?? ''} onChange={e => setCreateForm(p => ({ ...p, title: e.target.value }))}
+              className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-slate-100 focus:outline-none focus:border-blue-500"
+              placeholder="What needs to be done?" /></div>
+          <div><label className="block text-sm font-medium text-slate-300 mb-1.5">Notes</label>
+            <textarea value={createForm.notes ?? ''} onChange={e => setCreateForm(p => ({ ...p, notes: e.target.value }))}
+              className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-slate-100 focus:outline-none focus:border-blue-500 h-20 resize-none" /></div>
           <div className="grid grid-cols-2 gap-4">
-            <div><label className="block text-sm font-medium text-slate-300 mb-1.5">Due Date</label><input type="date" value={createForm.dueDate ?? ''} onChange={e => setCreateForm(p => ({ ...p, dueDate: e.target.value }))} className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-slate-100 focus:outline-none focus:border-blue-500" /></div>
+            <div><label className="block text-sm font-medium text-slate-300 mb-1.5">Due Date</label>
+              <input type="date" value={createForm.dueDate ?? ''} onChange={e => setCreateForm(p => ({ ...p, dueDate: e.target.value }))}
+                className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-slate-100 focus:outline-none focus:border-blue-500" /></div>
             <div><label className="block text-sm font-medium text-slate-300 mb-1.5">Priority</label>
-              <select value={createForm.priority ?? 'MEDIUM'} onChange={e => setCreateForm(p => ({ ...p, priority: e.target.value }))} className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-slate-100 focus:outline-none focus:border-blue-500">
+              <select value={createForm.priority ?? 'MEDIUM'} onChange={e => setCreateForm(p => ({ ...p, priority: e.target.value }))}
+                className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-slate-100 focus:outline-none focus:border-blue-500">
                 {['HIGH','MEDIUM','LOW'].map(v => <option key={v}>{v}</option>)}
-              </select>
-            </div>
+              </select></div>
           </div>
           <div><label className="block text-sm font-medium text-slate-300 mb-1.5">Assignee</label>
-            <select value={createForm.assignee ?? 'sunil'} onChange={e => setCreateForm(p => ({ ...p, assignee: e.target.value }))} className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-slate-100 focus:outline-none focus:border-blue-500">
+            <select value={createForm.assignee ?? 'sunil'} onChange={e => setCreateForm(p => ({ ...p, assignee: e.target.value }))}
+              className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-slate-100 focus:outline-none focus:border-blue-500">
               <option value="sunil">Sunil</option><option value="vidhya">Vidhya</option>
-            </select>
-          </div>
-          {goals.length > 0 && <div><label className="block text-sm font-medium text-slate-300 mb-1.5">Link to Goal (optional)</label>
-            <select value={createForm.goalId ?? ''} onChange={e => setCreateForm(p => ({ ...p, goalId: e.target.value }))} className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-slate-100 focus:outline-none focus:border-blue-500">
-              <option value="">No goal</option>{goals.map((g: { id: string; title: string }) => <option key={g.id} value={g.id}>{g.title}</option>)}
-            </select></div>}
-          <button onClick={() => createTask.mutate({ priority: 'MEDIUM', assignee: 'sunil', ...createForm })} disabled={!createForm.title?.trim()} className="w-full py-2.5 bg-blue-500 hover:bg-blue-400 disabled:opacity-50 text-white rounded-lg font-medium transition-colors">{createTask.isPending ? 'Creating...' : 'Create Task'}</button>
+            </select></div>
+          {goals.length > 0 && (
+            <div><label className="block text-sm font-medium text-slate-300 mb-1.5">Link to Goal (optional)</label>
+              <select value={createForm.goalId ?? ''} onChange={e => setCreateForm(p => ({ ...p, goalId: e.target.value }))}
+                className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-slate-100 focus:outline-none focus:border-blue-500">
+                <option value="">No goal</option>
+                {goals.map((g: { id: string; title: string }) => <option key={g.id} value={g.id}>{g.title}</option>)}
+              </select></div>
+          )}
+          <button onClick={() => createTask.mutate({ priority: 'MEDIUM', assignee: 'sunil', ...createForm })}
+            disabled={!createForm.title?.trim()}
+            className="w-full py-2.5 bg-blue-500 hover:bg-blue-400 disabled:opacity-50 text-white rounded-lg font-medium transition-colors">
+            {createTask.isPending ? 'Creating...' : 'Create Task'}
+          </button>
         </div>
       </Modal>
 
@@ -215,72 +418,77 @@ export default function TasksPage() {
       <Modal isOpen={!!selectedTask} onClose={() => setSelectedTask(null)} title="Task Details">
         {selectedTask && (
           <div className="space-y-5">
-            {/* Edit Fields */}
             <div className="space-y-3">
               <div><label className="block text-xs font-medium text-slate-400 mb-1">Title</label>
-                <input value={editForm.title ?? ''} onChange={e => setEditForm(p => ({ ...p, title: e.target.value }))} className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-slate-100 text-sm focus:outline-none focus:border-blue-500" />
-              </div>
+                <input value={editForm.title ?? ''} onChange={e => setEditForm(p => ({ ...p, title: e.target.value }))}
+                  className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-slate-100 text-sm focus:outline-none focus:border-blue-500" /></div>
               <div><label className="block text-xs font-medium text-slate-400 mb-1">Notes</label>
-                <textarea value={editForm.notes ?? ''} onChange={e => setEditForm(p => ({ ...p, notes: e.target.value }))} className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-slate-100 text-sm focus:outline-none focus:border-blue-500 h-20 resize-none" placeholder="Add notes..." />
-              </div>
+                <textarea value={editForm.notes ?? ''} onChange={e => setEditForm(p => ({ ...p, notes: e.target.value }))}
+                  className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-slate-100 text-sm focus:outline-none focus:border-blue-500 h-20 resize-none"
+                  placeholder="Add notes..." /></div>
               <div className="grid grid-cols-2 gap-3">
                 <div><label className="block text-xs font-medium text-slate-400 mb-1">Status</label>
-                  <select value={editForm.status ?? 'TODO'} onChange={e => setEditForm(p => ({ ...p, status: e.target.value }))} className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-slate-100 text-sm focus:outline-none focus:border-blue-500">
+                  <select value={editForm.status ?? 'TODO'} onChange={e => setEditForm(p => ({ ...p, status: e.target.value }))}
+                    className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-slate-100 text-sm focus:outline-none focus:border-blue-500">
                     <option value="TODO">To Do</option>
                     <option value="IN_PROGRESS">In Progress</option>
                     <option value="HOLD">On Hold</option>
                     <option value="DONE">Done</option>
-                  </select>
-                </div>
+                  </select></div>
                 <div><label className="block text-xs font-medium text-slate-400 mb-1">Priority</label>
-                  <select value={editForm.priority ?? 'MEDIUM'} onChange={e => setEditForm(p => ({ ...p, priority: e.target.value }))} className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-slate-100 text-sm focus:outline-none focus:border-blue-500">
+                  <select value={editForm.priority ?? 'MEDIUM'} onChange={e => setEditForm(p => ({ ...p, priority: e.target.value }))}
+                    className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-slate-100 text-sm focus:outline-none focus:border-blue-500">
                     {['HIGH','MEDIUM','LOW'].map(v => <option key={v}>{v}</option>)}
-                  </select>
-                </div>
+                  </select></div>
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div><label className="block text-xs font-medium text-slate-400 mb-1">Assignee</label>
-                  <select value={editForm.assignee ?? 'sunil'} onChange={e => setEditForm(p => ({ ...p, assignee: e.target.value }))} className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-slate-100 text-sm focus:outline-none focus:border-blue-500">
+                  <select value={editForm.assignee ?? 'sunil'} onChange={e => setEditForm(p => ({ ...p, assignee: e.target.value }))}
+                    className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-slate-100 text-sm focus:outline-none focus:border-blue-500">
                     <option value="sunil">Sunil</option><option value="vidhya">Vidhya</option>
-                  </select>
-                </div>
+                  </select></div>
                 <div><label className="block text-xs font-medium text-slate-400 mb-1">Due Date</label>
-                  <input type="date" value={editForm.dueDate ?? ''} onChange={e => setEditForm(p => ({ ...p, dueDate: e.target.value }))} className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-slate-100 text-sm focus:outline-none focus:border-blue-500" />
-                </div>
+                  <input type="date" value={editForm.dueDate ?? ''} onChange={e => setEditForm(p => ({ ...p, dueDate: e.target.value }))}
+                    className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-slate-100 text-sm focus:outline-none focus:border-blue-500" /></div>
               </div>
+              {goals.length > 0 && (
+                <div><label className="block text-xs font-medium text-slate-400 mb-1">Link to Goal</label>
+                  <select value={editForm.goalId ?? ''} onChange={e => setEditForm(p => ({ ...p, goalId: e.target.value }))}
+                    className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-slate-100 text-sm focus:outline-none focus:border-blue-500">
+                    <option value="">No goal</option>
+                    {goals.map((g: { id: string; title: string; type: string }) => (
+                      <option key={g.id} value={g.id}>
+                        {g.type === 'LIFE' ? '🌟' : g.type === 'LONG_TERM' ? '🎯' : '✅'} {g.title}
+                      </option>
+                    ))}
+                  </select></div>
+              )}
               <div className="flex gap-2">
-                <button onClick={() => saveEdit.mutate({ id: selectedTask.id, ...editForm })} disabled={saveEdit.isPending} className="flex-1 py-2 bg-blue-500 hover:bg-blue-400 disabled:opacity-50 text-white rounded-lg font-medium text-sm transition-colors">
+                <button onClick={() => saveEdit.mutate({ id: selectedTask.id, ...editForm })} disabled={saveEdit.isPending}
+                  className="flex-1 py-2 bg-blue-500 hover:bg-blue-400 disabled:opacity-50 text-white rounded-lg font-medium text-sm transition-colors">
                   {saveEdit.isPending ? 'Saving...' : 'Save Changes'}
                 </button>
-                <button onClick={() => deleteTask.mutate(selectedTask.id)} className="px-4 py-2 bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/30 rounded-lg text-sm transition-colors">
+                <button onClick={() => deleteTask.mutate(selectedTask.id)}
+                  className="px-4 py-2 bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/30 rounded-lg text-sm transition-colors">
                   <Trash2 size={14} />
                 </button>
               </div>
             </div>
 
-            {/* Divider */}
             <div className="border-t border-slate-700 pt-4">
               <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3 flex items-center gap-1.5">
                 <CheckSquare size={12} />Update Log
               </p>
-
-              {/* Post new update */}
               <div className="space-y-2 mb-4">
-                <textarea
-                  value={updateText}
-                  onChange={e => setUpdateText(e.target.value)}
+                <textarea value={updateText} onChange={e => setUpdateText(e.target.value)}
                   placeholder="Log a progress update, blocker, or note..."
-                  className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-slate-100 text-sm focus:outline-none focus:border-blue-500 h-20 resize-none placeholder-slate-500"
-                />
-                <button
-                  onClick={() => postUpdate.mutate({ taskId: selectedTask.id, text: updateText })}
+                  className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-slate-100 text-sm focus:outline-none focus:border-blue-500 h-20 resize-none placeholder-slate-500" />
+                <button onClick={() => postUpdate.mutate({ taskId: selectedTask.id, text: updateText })}
                   disabled={!updateText.trim() || postUpdate.isPending}
                   className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 text-white rounded-lg text-sm font-medium transition-colors">
                   <Send size={13} />{postUpdate.isPending ? 'Posting...' : 'Post Update'}
                 </button>
               </div>
-
-              {/* Past updates */}
               {updatesLoading
                 ? <LoadingSpinner className="py-4" />
                 : taskUpdates.length === 0
@@ -291,8 +499,11 @@ export default function TasksPage() {
                         <div key={u.id} className="bg-slate-700/50 rounded-lg p-3 border border-slate-600/50 group">
                           <p className="text-sm text-slate-200 leading-relaxed whitespace-pre-wrap">{u.text}</p>
                           <div className="flex items-center justify-between mt-1.5">
-                            <span className="text-xs text-slate-500 flex items-center gap-1"><Clock size={10} />{format(new Date(u.createdAt), 'MMM d, h:mm a')}</span>
-                            <button onClick={() => deleteUpdate.mutate({ taskId: selectedTask.id, updateId: u.id })} className="opacity-0 group-hover:opacity-100 text-slate-600 hover:text-red-400 transition-all">
+                            <span className="text-xs text-slate-500 flex items-center gap-1">
+                              <Clock size={10} />{format(new Date(u.createdAt), 'MMM d, h:mm a')}
+                            </span>
+                            <button onClick={() => deleteUpdate.mutate({ taskId: selectedTask.id, updateId: u.id })}
+                              className="opacity-0 group-hover:opacity-100 text-slate-600 hover:text-red-400 transition-all">
                               <Trash2 size={12} />
                             </button>
                           </div>

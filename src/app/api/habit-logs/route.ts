@@ -3,6 +3,47 @@ import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth';
 import prisma from '@/lib/prisma';
 
+export async function GET(req: NextRequest) {
+  const session = await getServerSession(authOptions);
+  if (!session?.user?.id) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  const userId = session.user.id;
+
+  const url = new URL(req.url);
+  const dateFrom = url.searchParams.get('dateFrom');
+  const dateTo = url.searchParams.get('dateTo');
+  const days = parseInt(url.searchParams.get('days') ?? '60', 10);
+
+  try {
+    let dateFilter: { gte?: Date; lte?: Date } = {};
+    if (dateFrom || dateTo) {
+      if (dateFrom) dateFilter.gte = new Date(dateFrom);
+      if (dateTo) { const d = new Date(dateTo); d.setHours(23, 59, 59, 999); dateFilter.lte = d; }
+    } else {
+      const from = new Date();
+      from.setDate(from.getDate() - days);
+      from.setHours(0, 0, 0, 0);
+      dateFilter = { gte: from };
+    }
+
+    const logs = await prisma.habitLog.findMany({
+      where: { userId, date: dateFilter },
+      orderBy: { date: 'desc' },
+    });
+
+    return NextResponse.json({
+      logs: logs.map(l => ({
+        id: l.id,
+        habitId: l.habitId,
+        date: l.date.toISOString().split('T')[0], // YYYY-MM-DD for easy string matching
+        completed: l.completed,
+      })),
+    });
+  } catch (error) {
+    console.error('[GET /api/habit-logs]', error);
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+  }
+}
+
 export async function POST(req: NextRequest) {
   const session = await getServerSession(authOptions);
   if (!session?.user?.id) {

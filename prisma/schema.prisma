@@ -105,6 +105,7 @@ model User {
   notes           Note[]
   xpLogs          XpLog[]
   bankUploadLogs  BankUploadLog[]
+  savingsGoals    SavingsGoal[]
 }
 
 model Habit {
@@ -112,9 +113,10 @@ model Habit {
   name        String
   icon        String
   color       String    @default("#3B82F6")
-  frequency   Frequency
-  targetDays  Int       @default(7)
-  userId      String
+  frequency     Frequency
+  targetDays    Int       @default(1)
+  scheduledDays Int[]    @default([])
+  userId        String
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
 
@@ -190,6 +192,8 @@ model Expense {
   date        DateTime
   paidBy      String   @default("sunil")
   bankAccount String?
+  isFixed     Boolean  @default(false)
+  expenseType String?
   notes       String?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
@@ -206,6 +210,7 @@ model Income {
   date        DateTime
   receivedBy  String
   recurring   Boolean  @default(false)
+  expenseType String?
   notes       String?
   createdAt   DateTime @default(now())
 
@@ -219,6 +224,7 @@ model BudgetCategory {
   icon         String?
   monthlyLimit Float
   alertAt      Int      @default(80)
+  isYearly     Boolean  @default(false)
   month        Int
   year         Int
   createdAt    DateTime @default(now())
@@ -369,4 +375,20 @@ model BankUploadLog {
   dateTo           DateTime
 
   user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model SavingsGoal {
+  id           String   @id @default(cuid())
+  userId       String
+  name         String
+  targetAmount Float
+  startMonth   Int      // 1-12
+  startYear    Int
+  endMonth     Int      // 1-12
+  endYear      Int
+  notes        String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
