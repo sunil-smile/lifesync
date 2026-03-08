@@ -71,22 +71,25 @@ prisma/
 ## 4. Pages & Features
 
 ### 4.1 Dashboard (`/dashboard`)
-- **Weekly Overview Strip:** 7 coloured day cards. Each card shows colour-coded status:
-  - `great` (emerald) — all habits done, no overdue tasks
-  - `good` (green) — most done
-  - `mixed` (amber) — partial completion
-  - `missed` (red) — nothing done on an active day
-  - `today` (blue) — current day
-  - `future` (slate) — upcoming days
-- **Day Drill-Down:** Click a day card to expand it. Shows missed habits (strikethrough, red), overdue tasks (red badge), and completed items.
-- **Today's Habit Progress Bar:** Inline bar showing X / N habits completed.
-- **Global Overdue Alert Banner:** Shown if any tasks are overdue (past due date, not DONE).
-- **Upcoming Tasks:** Next 5 non-DONE tasks sorted by due date.
+Two tabs: **Weekly Overview** and **Daily Overview**. Greeting + XP card + Global Overdue Alert are always visible above the tabs.
+
+#### Tab: Weekly Overview
+- **Weekly Strip:** 7 colour-coded day cards (great/good/mixed/missed/today/future) with prev/next week navigation.
+- **Day Drill-Down:** Click a day to expand. Shows missed habits (strikethrough, red), overdue tasks (red badge), and completed items.
+
+#### Tab: Daily Overview
+- **Today's Habit Progress Bar:** Inline bar showing X / N habits completed today.
+- **DayDrillDown locked to today:** Full breakdown of today's habits (toggleable), tasks due, and screen time.
+- **Screen Time Widget:** Today's total / productive / wasted hours + productivity %.
 - **Finance Snapshot:** Month-to-date income, expenses, savings, top budget warnings.
-- **Portfolio Summary:** Total value, return %, sector allocation pie.
-- **Screen Time Summary:** Today's productive vs total hours (falls back to 7-day average if no today data).
 - **Motivational Quote:** Latest quote from DB.
-- **Habit toggle fix (important):** Habit completion uses `POST /api/habit-logs` (toggle endpoint). The dashboard reads live habit log status from `GET /api/habit-logs?days=60` and `GET /api/habits` (which includes `weekDots` + `currentStreak`).
+- **Recent XP Activity:** Last 5 XP events.
+
+#### Always Visible
+- **Global Overdue Alert Banner:** Shown if any tasks are overdue (past due date, not DONE).
+- **Greeting + XP card:** User name, current level, XP progress bar.
+
+**Habit toggle:** Uses `POST /api/habit-logs` (toggles completed state). Dashboard reads live log status from `GET /api/habit-logs?days=60`. After toggle, invalidate `['dashboard']`, `['habits']`, and `['habit-logs']` query caches.
 
 ### 4.2 Finance (`/finance`)
 Three **parent tabs**:
@@ -123,11 +126,25 @@ A filter bar **above all three parent tabs** with four buttons:
 The filter is applied at the data source via `useMemo` so all downstream charts, totals, and tables cascade automatically without extra code.
 
 ### 4.3 Tasks (`/tasks`)
-- Kanban board: **TODO | IN_PROGRESS | HOLD | DONE** columns
-- Task fields: title, notes, dueDate, priority (HIGH/MEDIUM/LOW), assignee (sunil/vidhya), goalId (linked goal)
-- TaskUpdate log: per-task comment/update history
-- Drag-and-drop between columns
+Two views: **Board** and **Week**.
+
+#### Board View
+- 4 Kanban columns: **TODO | IN_PROGRESS | HOLD | DONE** (always all 4 shown)
+- Quick status advance button (→) on each card; hover to reveal edit/advance/delete
 - Overdue tasks highlighted in red
+
+#### Week View
+- 7-column grid for Mon–Sun of the selected week with prev/next navigation
+- Overdue tasks (past due, not in current week, not DONE) shown in a red banner above the grid
+- Tasks with no due date shown in a "No Due Date" section below the grid
+- Click any task card to open the edit modal
+- Each day column shows task count badge; today column highlighted in blue
+
+#### Common
+- Task fields: title, notes, dueDate, priority (HIGH/MEDIUM/LOW), assignee (sunil/vidhya), goalId (linked goal)
+- TaskUpdate log: per-task comment/update history in the edit modal
+- Filters: Priority, Assignee (no status filter — board always shows all 4 columns)
+- No status filter tabs — removed to keep the UI clean
 
 ### 4.4 Goals (`/goals`)
 - Goal hierarchy: LIFE → LONG_TERM → SHORT_TERM

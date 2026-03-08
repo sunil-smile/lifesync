@@ -9,12 +9,12 @@ import { Badge } from '@/components/ui/Badge';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import { useToast } from '@/components/ui/Toast';
-import { Plus, Trash2, ChevronRight, CheckSquare, Calendar, Pencil, Send, RotateCcw, Clock, BarChart2 } from 'lucide-react';
-import { format, isPast, isToday, parseISO, differenceInDays } from 'date-fns';
+import { Plus, Trash2, ChevronRight, CheckSquare, Calendar, Pencil, Send, RotateCcw, Clock, LayoutGrid, CalendarDays, ChevronLeft, AlertTriangle } from 'lucide-react';
+import { format, isPast, isToday, parseISO, startOfWeek, addDays, addWeeks, isSameDay, startOfDay, isBefore, isAfter } from 'date-fns';
 
 type TaskStatus = 'TODO' | 'IN_PROGRESS' | 'HOLD' | 'DONE';
-type Priority = 'HIGH' | 'MEDIUM' | 'LOW';
-type ViewMode = 'board' | 'timeline';
+type Priority   = 'HIGH' | 'MEDIUM' | 'LOW';
+type ViewMode   = 'board' | 'week';
 
 interface Task {
   id: string; title: string; notes?: string; dueDate?: string; createdAt: string;
@@ -27,15 +27,12 @@ const STATUS_CONFIG: Record<TaskStatus, { label: string; color: string; headerCo
   TODO:        { label: 'To Do',       color: 'border-blue-500/40 bg-blue-500/5',       headerColor: 'text-blue-400',    next: 'IN_PROGRESS', nextLabel: 'Start' },
   IN_PROGRESS: { label: 'In Progress', color: 'border-amber-500/40 bg-amber-500/5',     headerColor: 'text-amber-400',   next: 'DONE',        nextLabel: 'Complete' },
   HOLD:        { label: 'On Hold',     color: 'border-slate-500/40 bg-slate-500/5',     headerColor: 'text-slate-400',   next: 'IN_PROGRESS', nextLabel: 'Resume' },
-  DONE:        { label: 'Done',        color: 'border-emerald-500/40 bg-emerald-500/5', headerColor: 'text-emerald-400', next: null, nextLabel: null },
+  DONE:        { label: 'Done',        color: 'border-emerald-500/40 bg-emerald-500/5', headerColor: 'text-emerald-400', next: null,          nextLabel: null },
 };
 const PRIORITY_VARIANT: Record<Priority, 'red' | 'amber' | 'slate'> = { HIGH: 'red', MEDIUM: 'amber', LOW: 'slate' };
-const PRIORITY_COLOR: Record<Priority, string> = {
-  HIGH: 'bg-red-500',
-  MEDIUM: 'bg-amber-500',
-  LOW: 'bg-blue-400',
-};
+const PRIORITY_DOT: Record<Priority, string> = { HIGH: 'bg-red-500', MEDIUM: 'bg-amber-500', LOW: 'bg-blue-400' };
 const ALL_STATUSES: TaskStatus[] = ['TODO', 'IN_PROGRESS', 'HOLD', 'DONE'];
+const DAY_INITIALS = ['Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa', 'Su'];
 
 function DueDateChip({ date }: { date?: string }) {
   if (!date) return null;
@@ -44,151 +41,206 @@ function DueDateChip({ date }: { date?: string }) {
   return <span className={`text-xs flex items-center gap-1 ${cls}`}><Calendar size={10} />{format(d, 'MMM d')}</span>;
 }
 
-// ─── Timeline View ────────────────────────────────────────────────────────────
-function TimelineView({
-  tasks,
-  filterPriority,
+/* ══════════════════════════════════════════════════════════════════════════════
+   WEEK VIEW
+══════════════════════════════════════════════════════════════════════════════ */
+function WeekView({
+  tasks, filterPriority, filterAssignee, onEditTask,
 }: {
   tasks: Task[];
   filterPriority: Priority | 'ALL';
+  filterAssignee: 'ALL' | 'sunil' | 'vidhya';
+  onEditTask: (task: Task) => void;
 }) {
-  // Only tasks with both createdAt and dueDate, excluding DONE
-  const timelineTasks = tasks.filter(t =>
-    t.status !== 'DONE' &&
-    t.dueDate &&
-    (filterPriority === 'ALL' || t.priority === filterPriority)
+  const [weekOffset, setWeekOffset] = useState(0);
+  const today = new Date();
+  const weekStart = startOfWeek(addWeeks(today, weekOffset), { weekStartsOn: 1 });
+  const days = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i));
+
+  const filtered = tasks.filter(t => {
+    if (filterPriority !== 'ALL' && t.priority !== filterPriority) return false;
+    if (filterAssignee !== 'ALL' && t.assignee !== filterAssignee) return false;
+    return true;
+  });
+
+  // Overdue: past due, not done, due before this week
+  const overdueTasks = filtered.filter(t =>
+    t.dueDate && t.status !== 'DONE' &&
+    isBefore(parseISO(t.dueDate), startOfDay(today)) &&
+    !days.some(d => isSameDay(parseISO(t.dueDate!), d)),
   );
 
-  if (timelineTasks.length === 0) {
+  // Tasks by each day of the week
+  const tasksByDay = days.map(day =>
+    filtered.filter(t => t.dueDate && isSameDay(parseISO(t.dueDate), day)),
+  );
+
+  // Tasks with no due date (not done)
+  const noDueTasks = filtered.filter(t => !t.dueDate && t.status !== 'DONE');
+
+  const weekEnd = addDays(weekStart, 6);
+
+  function TaskCard({ task }: { task: Task }) {
+    const isOverdue = task.status !== 'DONE' && task.dueDate && isPast(parseISO(task.dueDate)) && !isToday(parseISO(task.dueDate));
     return (
-      <EmptyState icon={<BarChart2 size={24} />} title="No tasks to display"
-        description="Tasks need a due date to appear in the timeline. DONE tasks are hidden." />
+      <div
+        onClick={() => onEditTask(task)}
+        className={`rounded-lg p-2.5 border cursor-pointer transition-all group space-y-1.5
+          ${task.status === 'DONE'
+            ? 'bg-slate-800/40 border-slate-700/40 opacity-60'
+            : isOverdue
+              ? 'bg-red-950/30 border-red-500/40 hover:border-red-400/60'
+              : 'bg-slate-800 border-slate-700 hover:border-slate-600'}`}>
+        <div className="flex items-start gap-1.5">
+          <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 mt-1.5 ${PRIORITY_DOT[task.priority]}`} />
+          <p className={`text-xs font-medium leading-snug flex-1 ${task.status === 'DONE' ? 'line-through text-slate-500' : 'text-slate-200'}`}>
+            {task.title}
+          </p>
+        </div>
+        <div className="flex items-center justify-between pl-3">
+          <div className={`w-5 h-5 rounded-full flex items-center justify-center text-[9px] font-bold text-white flex-shrink-0
+            ${task.assignee === 'vidhya' ? 'bg-violet-500' : 'bg-blue-500'}`}>
+            {task.assignee === 'vidhya' ? 'V' : 'S'}
+          </div>
+          <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded
+            ${task.status === 'DONE' ? 'text-emerald-500 bg-emerald-500/10'
+              : task.status === 'IN_PROGRESS' ? 'text-amber-400 bg-amber-500/10'
+              : task.status === 'HOLD' ? 'text-slate-400 bg-slate-600/30'
+              : 'text-blue-400 bg-blue-500/10'}`}>
+            {task.status === 'IN_PROGRESS' ? 'WIP' : task.status === 'HOLD' ? 'HOLD' : task.status === 'DONE' ? 'DONE' : 'TODO'}
+          </span>
+        </div>
+      </div>
     );
   }
 
-  // Date range: today → max due date (or +30d if no tasks)
-  const now = new Date();
-  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  const dueDates = timelineTasks.map(t => parseISO(t.dueDate!));
-  const createdDates = timelineTasks.map(t => parseISO(t.createdAt));
-  const rangeStart = new Date(Math.min(today.getTime(), ...createdDates.map(d => d.getTime())));
-  const rangeEnd = new Date(Math.max(today.getTime() + 1000 * 60 * 60 * 24 * 7, ...dueDates.map(d => d.getTime())));
-  const totalDays = Math.max(differenceInDays(rangeEnd, rangeStart) + 1, 1);
-
-  // Sort by due date
-  const sorted = [...timelineTasks].sort((a, b) => parseISO(a.dueDate!).getTime() - parseISO(b.dueDate!).getTime());
-
-  // Month header ticks
-  const monthTicks: { label: string; left: number }[] = [];
-  const cursor = new Date(rangeStart);
-  cursor.setDate(1);
-  while (cursor <= rangeEnd) {
-    const left = (differenceInDays(cursor, rangeStart) / totalDays) * 100;
-    if (left >= 0 && left <= 100) {
-      monthTicks.push({ label: format(cursor, 'MMM d'), left });
-    }
-    cursor.setMonth(cursor.getMonth() + 1);
-  }
-
-  // Today marker
-  const todayLeft = (differenceInDays(today, rangeStart) / totalDays) * 100;
-
   return (
-    <div className="space-y-3">
-      {/* Timeline header */}
-      <div className="relative h-6 ml-56">
-        {/* Month ticks */}
-        {monthTicks.map((t, i) => (
-          <span key={i} className="absolute text-[10px] text-slate-500 transform -translate-x-1/2"
-            style={{ left: `${t.left}%` }}>
-            {t.label}
-          </span>
-        ))}
-        {/* Today marker label */}
-        <span className="absolute text-[10px] text-blue-400 font-semibold transform -translate-x-1/2"
-          style={{ left: `${Math.min(Math.max(todayLeft, 0), 100)}%` }}>
-          Today
-        </span>
-      </div>
-
-      {/* Task bars */}
-      <div className="space-y-2">
-        {sorted.map(task => {
-          const startDate = parseISO(task.createdAt);
-          const endDate = parseISO(task.dueDate!);
-          const isOverdue = isPast(endDate) && !isToday(endDate);
-
-          // Clamp to range
-          const startClamped = startDate < rangeStart ? rangeStart : startDate;
-          const endClamped = endDate > rangeEnd ? rangeEnd : endDate;
-
-          const leftPct = (differenceInDays(startClamped, rangeStart) / totalDays) * 100;
-          const widthPct = Math.max((differenceInDays(endClamped, startClamped) / totalDays) * 100, 1.5);
-
-          return (
-            <div key={task.id} className="flex items-center gap-2 h-9">
-              {/* Label */}
-              <div className="w-56 flex-shrink-0 flex items-center gap-2 pr-2">
-                <Badge variant={PRIORITY_VARIANT[task.priority]} size="sm">{task.priority}</Badge>
-                <span className="text-xs text-slate-200 truncate flex-1" title={task.title}>{task.title}</span>
-                {task.assignee === 'vidhya'
-                  ? <span className="w-5 h-5 rounded-full bg-violet-500 text-white text-[9px] font-bold flex items-center justify-center flex-shrink-0">V</span>
-                  : <span className="w-5 h-5 rounded-full bg-blue-500 text-white text-[9px] font-bold flex items-center justify-center flex-shrink-0">S</span>
-                }
-              </div>
-
-              {/* Bar track */}
-              <div className="flex-1 relative h-7 bg-slate-800 rounded-lg border border-slate-700 overflow-hidden">
-                {/* Today line */}
-                {todayLeft >= 0 && todayLeft <= 100 && (
-                  <div className="absolute top-0 bottom-0 w-px bg-blue-500/60 z-10"
-                    style={{ left: `${todayLeft}%` }} />
-                )}
-                {/* Task bar */}
-                <div
-                  className={`absolute top-1 bottom-1 rounded-md flex items-center px-2 text-white text-[10px] font-medium truncate z-20
-                    ${isOverdue ? 'bg-red-500/80' : PRIORITY_COLOR[task.priority]}`}
-                  style={{ left: `${leftPct}%`, width: `${widthPct}%` }}
-                  title={`${task.title}: ${format(startDate, 'MMM d')} → ${format(endDate, 'MMM d')}`}>
-                  {widthPct > 8 ? format(endDate, 'MMM d') : ''}
+    <div className="space-y-4">
+      {/* Overdue section */}
+      {overdueTasks.length > 0 && (
+        <div className="bg-red-500/8 border border-red-500/30 rounded-xl p-4">
+          <p className="text-xs font-semibold text-red-400 uppercase tracking-wider mb-3 flex items-center gap-1.5">
+            <AlertTriangle size={12} />Overdue ({overdueTasks.length})
+          </p>
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
+            {overdueTasks.map(task => (
+              <div key={task.id} onClick={() => onEditTask(task)}
+                className="bg-red-950/40 border border-red-500/30 rounded-lg p-2.5 cursor-pointer hover:border-red-400/50 transition-colors">
+                <div className="flex items-center gap-1.5 mb-1">
+                  <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${PRIORITY_DOT[task.priority]}`} />
+                  <p className="text-xs font-medium text-slate-200 truncate flex-1">{task.title}</p>
+                </div>
+                <div className="flex items-center gap-1 pl-3">
+                  <Clock size={9} className="text-red-400" />
+                  <span className="text-[10px] text-red-400 font-medium">
+                    Due {task.dueDate ? format(parseISO(task.dueDate), 'MMM d') : '—'}
+                  </span>
                 </div>
               </div>
-            </div>
-          );
-        })}
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Week navigation */}
+      <div className="bg-slate-800 rounded-xl border border-slate-700 overflow-hidden">
+        <div className="flex items-center justify-between px-5 py-3 border-b border-slate-700/60">
+          <button onClick={() => setWeekOffset(w => w - 1)}
+            className="p-2 text-slate-400 hover:text-slate-100 hover:bg-slate-700 rounded-lg transition-colors">
+            <ChevronLeft size={16} />
+          </button>
+          <div className="text-center">
+            <p className="text-sm font-semibold text-slate-200">
+              {format(weekStart, 'MMM d')} – {format(weekEnd, 'MMM d, yyyy')}
+            </p>
+            <p className="text-xs text-slate-500 mt-0.5">Click a task to edit</p>
+          </div>
+          <button onClick={() => setWeekOffset(w => w + 1)}
+            className="p-2 text-slate-400 hover:text-slate-100 hover:bg-slate-700 rounded-lg transition-colors">
+            <ChevronRight size={16} />
+          </button>
+        </div>
+
+        {/* 7-column grid */}
+        <div className="grid grid-cols-7 gap-px bg-slate-700/30 p-px">
+          {days.map((day, i) => {
+            const isTodayDay = isToday(day);
+            const isPastDay  = isBefore(day, startOfDay(today)) && !isTodayDay;
+            const dayTasks   = tasksByDay[i];
+            const hasOverdue = dayTasks.some(t => t.status !== 'DONE' && isPastDay);
+
+            return (
+              <div key={i} className={`flex flex-col min-h-[200px] p-2
+                ${isTodayDay ? 'bg-blue-500/5' : isPastDay ? 'bg-slate-800/20' : 'bg-slate-800/10'}`}>
+                {/* Day header */}
+                <div className={`text-center mb-2 pb-2 border-b
+                  ${isTodayDay ? 'border-blue-500/40' : 'border-slate-700/40'}`}>
+                  <p className={`text-[10px] font-bold tracking-widest uppercase
+                    ${isTodayDay ? 'text-blue-400' : 'text-slate-500'}`}>
+                    {DAY_INITIALS[i]}
+                  </p>
+                  <p className={`text-base font-bold leading-tight
+                    ${isTodayDay ? 'text-blue-300' : 'text-slate-300'}`}>
+                    {format(day, 'd')}
+                  </p>
+                  {dayTasks.length > 0 && (
+                    <span className={`text-[9px] font-semibold px-1.5 py-0.5 rounded-full
+                      ${hasOverdue ? 'text-red-400 bg-red-500/15' : 'text-slate-400 bg-slate-700/60'}`}>
+                      {dayTasks.length}
+                    </span>
+                  )}
+                </div>
+
+                {/* Task cards */}
+                <div className="flex flex-col gap-1.5 flex-1">
+                  {dayTasks.length === 0 ? (
+                    <div className="flex-1 flex items-center justify-center">
+                      <span className="text-[10px] text-slate-700">—</span>
+                    </div>
+                  ) : (
+                    dayTasks.map(task => <TaskCard key={task.id} task={task} />)
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
       </div>
 
-      {/* Legend */}
-      <div className="flex items-center gap-4 pt-2 text-[11px] text-slate-500">
-        <span className="flex items-center gap-1.5"><span className="w-3 h-2 rounded-sm bg-red-500 inline-block" />HIGH</span>
-        <span className="flex items-center gap-1.5"><span className="w-3 h-2 rounded-sm bg-amber-500 inline-block" />MEDIUM</span>
-        <span className="flex items-center gap-1.5"><span className="w-3 h-2 rounded-sm bg-blue-400 inline-block" />LOW</span>
-        <span className="flex items-center gap-1.5"><span className="w-3 h-2 rounded-sm bg-red-500/80 inline-block" />Overdue</span>
-        <span className="flex items-center gap-1.5"><span className="w-px h-3 bg-blue-500/60 inline-block" />Today</span>
-      </div>
+      {/* No due date tasks */}
+      {noDueTasks.length > 0 && (
+        <div className="bg-slate-800/50 border border-slate-700 rounded-xl p-4">
+          <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-3">
+            No Due Date ({noDueTasks.length})
+          </p>
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 gap-2">
+            {noDueTasks.map(task => <TaskCard key={task.id} task={task} />)}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
 
-// ─── Main Page ────────────────────────────────────────────────────────────────
+/* ══════════════════════════════════════════════════════════════════════════════
+   MAIN PAGE
+══════════════════════════════════════════════════════════════════════════════ */
 export default function TasksPage() {
   const qc = useQueryClient();
   const { toast } = useToast();
-  const [viewMode, setViewMode] = useState<ViewMode>('board');
-  const [filterStatus, setFilterStatus] = useState<TaskStatus | 'ALL'>('ALL');
+  const [viewMode, setViewMode]           = useState<ViewMode>('board');
   const [filterPriority, setFilterPriority] = useState<Priority | 'ALL'>('ALL');
   const [filterAssignee, setFilterAssignee] = useState<'ALL' | 'sunil' | 'vidhya'>('ALL');
   const [showCreateModal, setShowCreateModal] = useState(false);
-  const [createForm, setCreateForm] = useState<Record<string, string>>({});
-  const [selectedTask, setSelectedTask] = useState<Task | null>(null);
-  const [editForm, setEditForm] = useState<Record<string, string>>({});
-  const [updateText, setUpdateText] = useState('');
+  const [createForm, setCreateForm]       = useState<Record<string, string>>({});
+  const [selectedTask, setSelectedTask]   = useState<Task | null>(null);
+  const [editForm, setEditForm]           = useState<Record<string, string>>({});
+  const [updateText, setUpdateText]       = useState('');
 
   const { data, isLoading } = useQuery({
-    queryKey: ['tasks', filterStatus, filterPriority, filterAssignee],
+    queryKey: ['tasks', filterPriority, filterAssignee],
     queryFn: () => {
       const params = new URLSearchParams({ limit: '200' });
-      if (filterStatus !== 'ALL') params.set('status', filterStatus);
       if (filterPriority !== 'ALL') params.set('priority', filterPriority);
       if (filterAssignee !== 'ALL') params.set('assignee', filterAssignee);
       return axios.get(`/api/tasks?${params}`).then(r => r.data);
@@ -267,25 +319,16 @@ export default function TasksPage() {
           {/* View mode toggle */}
           <div className="flex gap-1 p-1 bg-slate-800 rounded-lg border border-slate-700">
             <button onClick={() => setViewMode('board')}
-              className={`px-3 py-1 rounded-md text-xs font-medium transition-colors
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors
                 ${viewMode === 'board' ? 'bg-blue-500 text-white' : 'text-slate-400 hover:text-slate-100'}`}>
-              Board
+              <LayoutGrid size={12} />Board
             </button>
-            <button onClick={() => setViewMode('timeline')}
-              className={`px-3 py-1 rounded-md text-xs font-medium transition-colors flex items-center gap-1
-                ${viewMode === 'timeline' ? 'bg-blue-500 text-white' : 'text-slate-400 hover:text-slate-100'}`}>
-              <BarChart2 size={11} />Timeline
+            <button onClick={() => setViewMode('week')}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors
+                ${viewMode === 'week' ? 'bg-blue-500 text-white' : 'text-slate-400 hover:text-slate-100'}`}>
+              <CalendarDays size={12} />Week
             </button>
           </div>
-
-          {/* Status filter (board only) */}
-          {viewMode === 'board' && (['ALL', ...ALL_STATUSES] as const).map(s => (
-            <button key={s} onClick={() => setFilterStatus(s)}
-              className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors
-                ${filterStatus === s ? 'bg-blue-500 text-white' : 'bg-slate-800 text-slate-400 hover:text-slate-100 border border-slate-700'}`}>
-              {s === 'ALL' ? 'All' : s === 'IN_PROGRESS' ? 'In Progress' : s === 'HOLD' ? 'On Hold' : s.charAt(0) + s.slice(1).toLowerCase()}
-            </button>
-          ))}
 
           {/* Priority filter */}
           <select value={filterPriority} onChange={e => setFilterPriority(e.target.value as Priority | 'ALL')}
@@ -364,12 +407,15 @@ export default function TasksPage() {
         )
       )}
 
-      {/* ── TIMELINE VIEW ── */}
-      {viewMode === 'timeline' && (
+      {/* ── WEEK VIEW ── */}
+      {viewMode === 'week' && (
         isLoading ? <LoadingSpinner className="py-12" /> : (
-          <div className="bg-slate-800/50 rounded-xl border border-slate-700 p-6 overflow-x-auto">
-            <TimelineView tasks={tasks} filterPriority={filterPriority} />
-          </div>
+          <WeekView
+            tasks={tasks}
+            filterPriority={filterPriority}
+            filterAssignee={filterAssignee}
+            onEditTask={openEdit}
+          />
         )
       )}
 

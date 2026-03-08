@@ -33,7 +33,7 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
   if (body.dueDate !== undefined) data.dueDate = body.dueDate ? new Date(body.dueDate) : null;
   if (body.priority !== undefined) data.priority = body.priority;
   if (body.assignee !== undefined) data.assignee = body.assignee;
-  if (body.goalId !== undefined) data.goalId = body.goalId;
+  if (body.goalId !== undefined) data.goalId = body.goalId || null;
   if (body.status !== undefined) data.status = body.status;
 
   const task = await prisma.task.update({

@@ -12,7 +12,7 @@ import {
   CheckCircle2, Circle, Flame, Zap, DollarSign,
   Calendar, Star, AlertTriangle, Monitor, Activity,
   ChevronLeft, ChevronRight, XCircle, Clock, TrendingUp,
-  CheckSquare, AlertCircle,
+  CheckSquare, AlertCircle, CalendarDays, LayoutDashboard,
 } from 'lucide-react';
 import {
   format, startOfWeek, addDays, isSameDay, addWeeks, isAfter,
@@ -32,21 +32,16 @@ function formatCurrency(n: number) {
 
 const DAY_INITIALS = ['Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa', 'Su'];
 
-type HabitLog = { id: string; habitId: string; date: string; completed: boolean };
-type Habit    = { id: string; name: string; icon: string; color?: string };
-type Task     = { id: string; title: string; dueDate?: string; priority: string; status: string };
+type HabitLog  = { id: string; habitId: string; date: string; completed: boolean };
+type Habit     = { id: string; name: string; icon: string; color?: string };
+type Task      = { id: string; title: string; dueDate?: string; priority: string; status: string };
 type ScreenLog = { date: string; totalHours: number; productiveHours: number; notes?: string | null };
+type DashTab   = 'weekly' | 'daily';
 
 /* ─── Day status helper ─────────────────────────────────────────────────────── */
 type DayStatus = 'great' | 'good' | 'mixed' | 'missed' | 'neutral' | 'today' | 'future';
 
-function getDayStatus(
-  habitPct: number,
-  habitTotal: number,
-  overdueCount: number,
-  isFuture: boolean,
-  isTodayDay: boolean,
-): DayStatus {
+function getDayStatus(habitPct: number, habitTotal: number, overdueCount: number, isFuture: boolean, isTodayDay: boolean): DayStatus {
   if (isFuture) return 'future';
   if (isTodayDay) return 'today';
   if (habitTotal === 0) return overdueCount > 0 ? 'missed' : 'neutral';
@@ -73,34 +68,25 @@ function WeekStrip({
   weekStart, selectedDay, habits, logs, tasks, screenLogs,
   onSelectDay, onPrevWeek, onNextWeek, canGoNext,
 }: {
-  weekStart: Date;
-  selectedDay: Date | null;
-  habits: Habit[];
-  logs: HabitLog[];
-  tasks: Task[];
-  screenLogs: ScreenLog[];
+  weekStart: Date; selectedDay: Date | null; habits: Habit[];
+  logs: HabitLog[]; tasks: Task[]; screenLogs: ScreenLog[];
   onSelectDay: (d: Date | null) => void;
-  onPrevWeek: () => void;
-  onNextWeek: () => void;
-  canGoNext: boolean;
+  onPrevWeek: () => void; onNextWeek: () => void; canGoNext: boolean;
 }) {
   const now  = new Date();
   const days = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i));
 
-  // Week summary stats
   const weekStats = useMemo(() => {
     let totalDone = 0, totalExpected = 0, overdueInWeek = 0;
     days.forEach(day => {
       const dStr = format(day, 'yyyy-MM-dd');
-      const isPast = isBefore(day, startOfDay(now)) && !isToday(day);
+      const isPastDay = isBefore(day, startOfDay(now)) && !isToday(day);
       const isTodayDay = isToday(day);
-      if (isPast || isTodayDay) {
+      if (isPastDay || isTodayDay) {
         const done = logs.filter(l => l.date === dStr && l.completed).length;
         totalDone += done;
         totalExpected += habits.length;
-        overdueInWeek += tasks.filter(t =>
-          t.dueDate && t.dueDate.startsWith(dStr) && t.status !== 'DONE',
-        ).length;
+        overdueInWeek += tasks.filter(t => t.dueDate && t.dueDate.startsWith(dStr) && t.status !== 'DONE').length;
       }
     });
     const pct = totalExpected > 0 ? Math.round((totalDone / totalExpected) * 100) : 0;
@@ -109,17 +95,15 @@ function WeekStrip({
 
   return (
     <div className="bg-slate-800 rounded-2xl border border-slate-700 overflow-hidden">
-      {/* Header */}
       <div className="flex items-center justify-between px-5 py-3 border-b border-slate-700/60">
-        <button onClick={onPrevWeek}
-          className="p-2 text-slate-400 hover:text-slate-100 hover:bg-slate-700 rounded-lg transition-colors">
+        <button onClick={onPrevWeek} className="p-2 text-slate-400 hover:text-slate-100 hover:bg-slate-700 rounded-lg transition-colors">
           <ChevronLeft size={16} />
         </button>
         <div className="text-center">
           <p className="text-sm font-semibold text-slate-200">
             {format(weekStart, 'MMM d')} – {format(addDays(weekStart, 6), 'MMM d, yyyy')}
           </p>
-          <p className="text-xs text-slate-500 mt-0.5">Weekly Overview · click a day to explore</p>
+          <p className="text-xs text-slate-500 mt-0.5">Click a day to see details</p>
         </div>
         <button onClick={onNextWeek} disabled={!canGoNext}
           className="p-2 text-slate-400 hover:text-slate-100 hover:bg-slate-700 rounded-lg transition-colors disabled:opacity-30 disabled:cursor-not-allowed">
@@ -127,87 +111,61 @@ function WeekStrip({
         </button>
       </div>
 
-      {/* Day columns */}
       <div className="grid grid-cols-7 gap-px bg-slate-700/30 p-px">
         {days.map((day, i) => {
-          const dStr = format(day, 'yyyy-MM-dd');
+          const dStr       = format(day, 'yyyy-MM-dd');
           const isTodayDay = isToday(day);
-          const isFuture = isAfter(day, now) && !isTodayDay;
-          const isPast = isBefore(day, startOfDay(now)) && !isTodayDay;
+          const isFuture   = isAfter(day, now) && !isTodayDay;
+          const isPastDay  = isBefore(day, startOfDay(now)) && !isTodayDay;
           const isSelected = selectedDay ? isSameDay(day, selectedDay) : false;
 
-          const dayLogs     = logs.filter(l => l.date === dStr && l.completed);
-          const habitDone   = dayLogs.length;
-          const habitTotal  = habits.length;
-          const habitPct    = habitTotal > 0 ? (habitDone / habitTotal) * 100 : 0;
-          const missedCount = habitTotal > 0 && (isPast || isTodayDay) ? habitTotal - habitDone : 0;
-
-          const dayTasks = tasks.filter(t => t.dueDate && t.dueDate.startsWith(dStr));
-          const overdueCount = (isPast || isTodayDay)
-            ? dayTasks.filter(t => t.status !== 'DONE').length : 0;
-
-          const status = getDayStatus(habitPct, habitTotal, overdueCount, isFuture, isTodayDay);
-          const sty    = STATUS_STYLES[status];
-          const stLog  = screenLogs.find(l => l.date.startsWith(dStr));
+          const dayLogs    = logs.filter(l => l.date === dStr && l.completed);
+          const habitDone  = dayLogs.length;
+          const habitTotal = habits.length;
+          const habitPct   = habitTotal > 0 ? (habitDone / habitTotal) * 100 : 0;
+          const missedCount = habitTotal > 0 && (isPastDay || isTodayDay) ? habitTotal - habitDone : 0;
+          const dayTasks   = tasks.filter(t => t.dueDate && t.dueDate.startsWith(dStr));
+          const overdueCount = (isPastDay || isTodayDay) ? dayTasks.filter(t => t.status !== 'DONE').length : 0;
+          const status     = getDayStatus(habitPct, habitTotal, overdueCount, isFuture, isTodayDay);
+          const sty        = STATUS_STYLES[status];
+          const stLog      = screenLogs.find(l => l.date.startsWith(dStr));
 
           return (
-            <button key={i}
-              onClick={() => !isFuture && onSelectDay(isSelected ? null : day)}
+            <button key={i} onClick={() => !isFuture && onSelectDay(isSelected ? null : day)}
               disabled={isFuture}
-              className={`
-                relative flex flex-col items-center gap-1.5 py-3 px-1.5 transition-all group
-                ${isSelected
-                  ? 'bg-blue-600/20 ring-1 ring-inset ring-blue-500/60'
-                  : `${sty.bg} hover:bg-slate-700/50`}
-                ${isFuture ? 'opacity-30 cursor-not-allowed' : 'cursor-pointer'}
-              `}>
+              className={`relative flex flex-col items-center gap-1.5 py-3 px-1.5 transition-all
+                ${isSelected ? 'bg-blue-600/20 ring-1 ring-inset ring-blue-500/60' : `${sty.bg} hover:bg-slate-700/50`}
+                ${isFuture ? 'opacity-30 cursor-not-allowed' : 'cursor-pointer'}`}>
 
-              {/* Day label */}
-              <span className={`text-[10px] font-bold tracking-widest uppercase
-                ${isTodayDay ? 'text-blue-400' : 'text-slate-500'}`}>
+              <span className={`text-[10px] font-bold tracking-widest uppercase ${isTodayDay ? 'text-blue-400' : 'text-slate-500'}`}>
                 {DAY_INITIALS[i]}
               </span>
-
-              {/* Date number */}
-              <span className={`text-lg font-bold leading-none
-                ${isTodayDay ? 'text-blue-300' : isSelected ? 'text-white' : 'text-slate-200'}`}>
+              <span className={`text-lg font-bold leading-none ${isTodayDay ? 'text-blue-300' : isSelected ? 'text-white' : 'text-slate-200'}`}>
                 {format(day, 'd')}
               </span>
+              {isTodayDay && <span className="text-[8px] font-bold tracking-wider text-blue-400 uppercase -mt-1">today</span>}
 
-              {/* Today badge */}
-              {isTodayDay && (
-                <span className="text-[8px] font-bold tracking-wider text-blue-400 uppercase -mt-1">today</span>
-              )}
-
-              {/* Habit ring */}
               {!isFuture && habitTotal > 0 && (
                 <div className="relative w-10 h-10 flex-shrink-0 my-0.5">
                   <svg viewBox="0 0 40 40" className="w-full h-full -rotate-90">
                     <circle cx="20" cy="20" r="16" fill="none" stroke="#1e293b" strokeWidth="3.5" />
-                    <circle cx="20" cy="20" r="16" fill="none"
-                      stroke={sty.ring}
-                      strokeWidth="3.5"
-                      strokeDasharray={`${Math.round(habitPct * 1.005)} 100.5`}
-                      strokeLinecap="round"
-                      className="transition-all duration-500"
-                    />
+                    <circle cx="20" cy="20" r="16" fill="none" stroke={sty.ring} strokeWidth="3.5"
+                      strokeDasharray={`${Math.round(habitPct * 1.005)} 100.5`} strokeLinecap="round"
+                      className="transition-all duration-500" />
                   </svg>
                   <span className="absolute inset-0 flex items-center justify-center text-[9px] font-bold text-slate-300">
                     {habitDone}/{habitTotal}
                   </span>
                 </div>
               )}
-
-              {/* No habits configured */}
               {!isFuture && habitTotal === 0 && (
                 <div className="w-10 h-10 rounded-full bg-slate-700/40 flex items-center justify-center my-0.5">
                   <span className="text-[9px] text-slate-600">—</span>
                 </div>
               )}
 
-              {/* Alert indicators */}
               <div className="flex flex-col items-center gap-0.5 w-full min-h-[28px]">
-                {(isPast || isTodayDay) && missedCount > 0 && (
+                {(isPastDay || isTodayDay) && missedCount > 0 && (
                   <div className="flex items-center gap-0.5">
                     <XCircle size={8} className={status === 'missed' ? 'text-red-400' : 'text-amber-400'} />
                     <span className={`text-[8px] font-semibold ${status === 'missed' ? 'text-red-400' : 'text-amber-400'}`}>
@@ -218,20 +176,17 @@ function WeekStrip({
                 {overdueCount > 0 && (
                   <div className="flex items-center gap-0.5">
                     <AlertTriangle size={8} className="text-red-400" />
-                    <span className="text-[8px] font-semibold text-red-400">
-                      {overdueCount} overdue
-                    </span>
+                    <span className="text-[8px] font-semibold text-red-400">{overdueCount} overdue</span>
                   </div>
                 )}
                 {stLog && !isFuture && (
                   <span className="text-[8px] text-cyan-500">{stLog.totalHours}h</span>
                 )}
-                {(isPast || isTodayDay) && overdueCount === 0 && missedCount === 0 && habitTotal > 0 && (
+                {(isPastDay || isTodayDay) && overdueCount === 0 && missedCount === 0 && habitTotal > 0 && (
                   <CheckCircle2 size={10} className="text-emerald-500 opacity-70" />
                 )}
               </div>
 
-              {/* Selected indicator line */}
               {isSelected && (
                 <div className="absolute bottom-0 left-1/2 -translate-x-1/2 w-6 h-0.5 rounded-full bg-blue-400" />
               )}
@@ -240,7 +195,6 @@ function WeekStrip({
         })}
       </div>
 
-      {/* Week summary bar */}
       <div className="px-5 py-3 border-t border-slate-700/60 flex items-center justify-between gap-4 flex-wrap">
         <div className="flex items-center gap-3">
           <div className="flex items-center gap-1.5">
@@ -265,8 +219,7 @@ function WeekStrip({
             <div
               className={`h-full rounded-full transition-all duration-500
                 ${weekStats.pct >= 80 ? 'bg-emerald-500' : weekStats.pct >= 50 ? 'bg-amber-500' : 'bg-red-500'}`}
-              style={{ width: `${weekStats.pct}%` }}
-            />
+              style={{ width: `${weekStats.pct}%` }} />
           </div>
           <span className={`text-xs font-semibold tabular-nums
             ${weekStats.pct >= 80 ? 'text-emerald-400' : weekStats.pct >= 50 ? 'text-amber-400' : 'text-red-400'}`}>
@@ -284,27 +237,24 @@ function WeekStrip({
 function DayDrillDown({
   day, habits, logs, tasks, screenLogs, onToggleHabit,
 }: {
-  day: Date;
-  habits: Habit[];
-  logs: HabitLog[];
-  tasks: Task[];
+  day: Date; habits: Habit[]; logs: HabitLog[]; tasks: Task[];
   screenLogs: ScreenLog[];
   onToggleHabit: (habitId: string, currentCompleted: boolean) => void;
 }) {
-  const dStr        = format(day, 'yyyy-MM-dd');
-  const isTodayDay  = isToday(day);
-  const isPast      = isBefore(day, startOfDay(new Date())) && !isTodayDay;
+  const dStr       = format(day, 'yyyy-MM-dd');
+  const isTodayDay = isToday(day);
+  const isPastDay  = isBefore(day, startOfDay(new Date())) && !isTodayDay;
 
   const dayLogs = logs.filter(l => l.date === dStr);
   const habitsWithStatus = habits.map(h => ({
     ...h,
     completed: dayLogs.find(l => l.habitId === h.id)?.completed ?? false,
   }));
-  const completedCount  = habitsWithStatus.filter(h => h.completed).length;
-  const habitPct        = habits.length > 0 ? Math.round((completedCount / habits.length) * 100) : 0;
+  const completedCount = habitsWithStatus.filter(h => h.completed).length;
+  const habitPct = habits.length > 0 ? Math.round((completedCount / habits.length) * 100) : 0;
 
   const dayTasks    = tasks.filter(t => t.dueDate && t.dueDate.startsWith(dStr));
-  const overdueTasks = dayTasks.filter(t => t.status !== 'DONE' && (isPast || isTodayDay));
+  const overdueTasks = dayTasks.filter(t => t.status !== 'DONE' && (isPastDay || isTodayDay));
 
   const stLog = screenLogs.find(l => l.date.startsWith(dStr));
   const stPct = stLog && stLog.totalHours > 0
@@ -312,9 +262,8 @@ function DayDrillDown({
 
   return (
     <div className="bg-slate-800 rounded-2xl border border-slate-700 overflow-hidden">
-      {/* Header */}
       <div className={`px-5 py-3.5 border-b border-slate-700/60 flex items-center justify-between
-        ${isTodayDay ? 'bg-blue-600/10' : isPast && overdueTasks.length > 0 ? 'bg-red-500/5' : ''}`}>
+        ${isTodayDay ? 'bg-blue-600/10' : isPastDay && overdueTasks.length > 0 ? 'bg-red-500/5' : ''}`}>
         <div>
           <h3 className="text-base font-semibold text-slate-100">
             {isTodayDay ? '📅 Today' : format(day, 'EEEE, MMMM d')}
@@ -332,8 +281,7 @@ function DayDrillDown({
           )}
           {overdueTasks.length > 0 && (
             <div className="px-2.5 py-1 rounded-lg bg-red-500/15 text-red-400 text-xs font-semibold flex items-center gap-1">
-              <AlertTriangle size={11} />
-              {overdueTasks.length} overdue
+              <AlertTriangle size={11} />{overdueTasks.length} overdue
             </div>
           )}
         </div>
@@ -351,20 +299,16 @@ function DayDrillDown({
           ) : (
             <div className="space-y-2">
               {habitsWithStatus.map(habit => {
-                const isMissed = isPast && !habit.completed;
+                const isMissed = isPastDay && !habit.completed;
                 return (
                   <div key={habit.id}
                     className={`flex items-center gap-3 p-3 rounded-xl transition-colors
-                      ${isMissed
-                        ? 'bg-red-500/8 border border-red-500/20'
-                        : habit.completed
-                          ? 'bg-emerald-500/8 border border-emerald-500/20'
-                          : 'bg-slate-700/40 border border-slate-600/30'
-                      }`}>
+                      ${isMissed ? 'bg-red-500/8 border border-red-500/20'
+                        : habit.completed ? 'bg-emerald-500/8 border border-emerald-500/20'
+                        : 'bg-slate-700/40 border border-slate-600/30'}`}>
                     <span className="text-xl flex-shrink-0">{habit.icon}</span>
                     <span className={`flex-1 text-sm font-medium
-                      ${isMissed ? 'text-slate-400 line-through decoration-red-400/50'
-                        : 'text-slate-200'}`}>
+                      ${isMissed ? 'text-slate-400 line-through decoration-red-400/50' : 'text-slate-200'}`}>
                       {habit.name}
                     </span>
                     {isMissed && (
@@ -373,15 +317,12 @@ function DayDrillDown({
                       </span>
                     )}
                     {isTodayDay ? (
-                      <button
-                        onClick={() => onToggleHabit(habit.id, habit.completed)}
+                      <button onClick={() => onToggleHabit(habit.id, habit.completed)}
                         className={`flex-shrink-0 p-1 rounded-lg transition-all
                           ${habit.completed
                             ? 'text-emerald-400 hover:text-emerald-300 hover:bg-emerald-500/10'
                             : 'text-slate-500 hover:text-slate-300 hover:bg-slate-600/50'}`}>
-                        {habit.completed
-                          ? <CheckCircle2 size={20} />
-                          : <Circle size={20} />}
+                        {habit.completed ? <CheckCircle2 size={20} /> : <Circle size={20} />}
                       </button>
                     ) : (
                       !isMissed && habit.completed && (
@@ -397,7 +338,6 @@ function DayDrillDown({
 
         {/* ── Right Column ── */}
         <div className="space-y-4">
-          {/* Tasks */}
           <div>
             <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3">Tasks Due</p>
             {dayTasks.length === 0 ? (
@@ -405,7 +345,7 @@ function DayDrillDown({
             ) : (
               <div className="space-y-2">
                 {dayTasks.map(task => {
-                  const isOverdue = task.status !== 'DONE' && (isPast || isTodayDay);
+                  const isOverdue = task.status !== 'DONE' && (isPastDay || isTodayDay);
                   return (
                     <div key={task.id}
                       className={`flex items-start gap-2 p-2.5 rounded-lg
@@ -416,9 +356,7 @@ function DayDrillDown({
                           {task.title}
                         </p>
                         <div className="flex items-center gap-1.5 mt-1">
-                          <Badge
-                            variant={task.priority === 'HIGH' ? 'red' : task.priority === 'MEDIUM' ? 'amber' : 'slate'}
-                            size="sm">
+                          <Badge variant={task.priority === 'HIGH' ? 'red' : task.priority === 'MEDIUM' ? 'amber' : 'slate'} size="sm">
                             {task.priority}
                           </Badge>
                           {isOverdue && (
@@ -439,7 +377,6 @@ function DayDrillDown({
             )}
           </div>
 
-          {/* Screen time */}
           {stLog && (
             <div>
               <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3">Screen Time</p>
@@ -462,8 +399,7 @@ function DayDrillDown({
                   <div className="h-1.5 bg-slate-700 rounded-full overflow-hidden">
                     <div
                       className={`h-full rounded-full transition-all ${stPct >= 60 ? 'bg-emerald-500' : stPct >= 40 ? 'bg-amber-500' : 'bg-red-500'}`}
-                      style={{ width: `${stPct}%` }}
-                    />
+                      style={{ width: `${stPct}%` }} />
                   </div>
                 </div>
               </div>
@@ -480,8 +416,9 @@ function DayDrillDown({
 ══════════════════════════════════════════════════════════════════════════════ */
 export default function DashboardPage() {
   const qc = useQueryClient();
-  const [weekOffset, setWeekOffset]     = useState(0);
-  const [selectedDay, setSelectedDay]   = useState<Date | null>(new Date());
+  const [dashTab, setDashTab]         = useState<DashTab>('weekly');
+  const [weekOffset, setWeekOffset]   = useState(0);
+  const [selectedDay, setSelectedDay] = useState<Date | null>(new Date());
 
   const weekStart = startOfWeek(addWeeks(new Date(), weekOffset), { weekStartsOn: 1 });
 
@@ -525,27 +462,30 @@ export default function DashboardPage() {
 
   /* XP progress */
   const NEXT_LEVEL_XP = [0, 100, 250, 500, 900, 1400, 2100, 3000, 4200, 6000];
-  const lvl    = (motivationSummary?.level ?? 1) - 1;
-  const nextXP = NEXT_LEVEL_XP[lvl + 1] ?? user?.xp;
-  const currXP = user?.xp ?? 0;
+  const lvl     = (motivationSummary?.level ?? 1) - 1;
+  const nextXP  = NEXT_LEVEL_XP[lvl + 1] ?? user?.xp;
+  const currXP  = user?.xp ?? 0;
   const lvlStart = NEXT_LEVEL_XP[lvl] ?? 0;
-  const xpPct  = nextXP > lvlStart ? Math.round(((currXP - lvlStart) / (nextXP - lvlStart)) * 100) : 100;
+  const xpPct   = nextXP > lvlStart ? Math.round(((currXP - lvlStart) / (nextXP - lvlStart)) * 100) : 100;
 
-  /* Derived lists */
   const allHabits: Habit[] = (habitsApiData?.habits ?? todayHabits?.habits ?? []).map(
-    (h: Habit & { weekDots?: unknown[]; currentStreak?: number }) => ({
-      id: h.id, name: h.name, icon: h.icon, color: h.color,
-    }),
+    (h: Habit & { weekDots?: unknown[]; currentStreak?: number }) => ({ id: h.id, name: h.name, icon: h.icon, color: h.color }),
   );
-  const allLogs: HabitLog[]       = logsApiData?.logs ?? [];
-  const allTasks: Task[]          = tasksData?.tasks ?? upcomingTasks ?? [];
+  const allLogs: HabitLog[]        = logsApiData?.logs ?? [];
+  const allTasks: Task[]           = tasksData?.tasks ?? upcomingTasks ?? [];
   const allScreenLogs: ScreenLog[] = screenTimeApiData?.logs ?? [];
 
-  /* Overdue tasks (across all time, not just current week) */
   const now = new Date();
+  const todayStr = format(now, 'yyyy-MM-dd');
+
+  /* Global overdue */
   const globalOverdue = allTasks.filter(t =>
     t.dueDate && t.status !== 'DONE' && isBefore(new Date(t.dueDate), now),
   );
+
+  /* Today's habit progress (for daily tab) */
+  const doneTodayCount = allLogs.filter(l => l.date === todayStr && l.completed).length;
+  const todayPct = allHabits.length > 0 ? Math.round((doneTodayCount / allHabits.length) * 100) : 0;
 
   return (
     <div className="p-6 space-y-6">
@@ -582,218 +522,225 @@ export default function DashboardPage() {
             </p>
             <div className="flex flex-wrap gap-2">
               {globalOverdue.slice(0, 4).map(t => (
-                <span key={t.id}
-                  className="text-xs bg-red-500/15 text-red-300 px-2 py-0.5 rounded-md truncate max-w-[160px]">
+                <span key={t.id} className="text-xs bg-red-500/15 text-red-300 px-2 py-0.5 rounded-md truncate max-w-[160px]">
                   {t.title}
-                  {t.dueDate && (
-                    <span className="text-red-500 ml-1">· {format(new Date(t.dueDate), 'MMM d')}</span>
-                  )}
+                  {t.dueDate && <span className="text-red-500 ml-1">· {format(new Date(t.dueDate), 'MMM d')}</span>}
                 </span>
               ))}
-              {globalOverdue.length > 4 && (
-                <span className="text-xs text-red-500">+{globalOverdue.length - 4} more</span>
-              )}
+              {globalOverdue.length > 4 && <span className="text-xs text-red-500">+{globalOverdue.length - 4} more</span>}
             </div>
           </div>
         </div>
       )}
 
-      {/* ── Today's Habit Progress (quick summary) ── */}
-      {allHabits.length > 0 && (() => {
-        const todayStr = format(now, 'yyyy-MM-dd');
-        const doneTodayCount = allLogs.filter(l => l.date === todayStr && l.completed).length;
-        const todayPct = Math.round((doneTodayCount / allHabits.length) * 100);
-        return (
-          <div className="flex items-center gap-4 bg-slate-800 border border-slate-700 rounded-xl px-5 py-3.5">
-            <div className="flex items-center gap-2.5 flex-1">
-              <CheckSquare size={16} className={
-                todayPct === 100 ? 'text-emerald-400' : todayPct >= 50 ? 'text-amber-400' : 'text-red-400'
-              } />
-              <span className="text-sm font-medium text-slate-300">Today's Habits</span>
-              <span className={`text-sm font-bold
-                ${todayPct === 100 ? 'text-emerald-300' : todayPct >= 50 ? 'text-amber-300' : 'text-red-300'}`}>
-                {doneTodayCount}/{allHabits.length}
-              </span>
-            </div>
-            <div className="w-40 flex items-center gap-2">
-              <div className="flex-1 h-2 bg-slate-700 rounded-full overflow-hidden">
-                <div
-                  className={`h-full rounded-full transition-all
-                    ${todayPct === 100 ? 'bg-emerald-500' : todayPct >= 50 ? 'bg-amber-500' : 'bg-red-500'}`}
-                  style={{ width: `${todayPct}%` }}
-                />
-              </div>
-              <span className={`text-xs font-bold tabular-nums w-8 text-right
-                ${todayPct === 100 ? 'text-emerald-400' : todayPct >= 50 ? 'text-amber-400' : 'text-red-400'}`}>
-                {todayPct}%
-              </span>
-            </div>
-            {todayPct === 100 && (
-              <span className="text-sm">🔥</span>
-            )}
-          </div>
-        );
-      })()}
-
-      {/* ── Weekly Strip ── */}
-      <WeekStrip
-        weekStart={weekStart}
-        selectedDay={selectedDay}
-        habits={allHabits}
-        logs={allLogs}
-        tasks={allTasks}
-        screenLogs={allScreenLogs}
-        onSelectDay={setSelectedDay}
-        onPrevWeek={() => { setWeekOffset(w => w - 1); setSelectedDay(null); }}
-        onNextWeek={() => { setWeekOffset(w => Math.min(w + 1, 0)); setSelectedDay(null); }}
-        canGoNext={weekOffset < 0}
-      />
-
-      {/* ── Day Drill Down ── */}
-      {selectedDay && (
-        <DayDrillDown
-          day={selectedDay}
-          habits={allHabits}
-          logs={allLogs}
-          tasks={allTasks}
-          screenLogs={allScreenLogs}
-          onToggleHabit={(habitId, currentCompleted) =>
-            toggleHabit.mutate({ habitId, currentCompleted })}
-        />
-      )}
-
-      {/* ── Screen Time Widget ── */}
-      {(screenTimeSummary?.todayTotal !== null && screenTimeSummary?.todayTotal !== undefined) && (
-        <Card>
-          <div className="flex items-center justify-between flex-wrap gap-4">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-slate-700 flex items-center justify-center flex-shrink-0">
-                <Monitor size={18} className="text-blue-400" />
-              </div>
-              <div>
-                <p className="text-sm font-semibold text-slate-200">Screen Time Today</p>
-                <p className="text-xs text-slate-500">
-                  {screenTimeSummary.isEstimate ? 'Based on 7-day average (no entry today)' : 'Logged today'}
-                </p>
-              </div>
-            </div>
-            <div className="flex items-center gap-6 flex-wrap">
-              <div className="text-center">
-                <p className="text-lg font-bold text-slate-100">{screenTimeSummary.todayTotal?.toFixed(1)}h</p>
-                <p className="text-[11px] text-slate-500">Total</p>
-              </div>
-              <div className="text-center">
-                <p className="text-lg font-bold text-emerald-400">{(screenTimeSummary.todayProductive ?? 0).toFixed(1)}h</p>
-                <p className="text-[11px] text-slate-500">Productive</p>
-              </div>
-              <div className="text-center">
-                <p className="text-lg font-bold text-red-400">{(screenTimeSummary.unproductiveHours ?? 0).toFixed(1)}h</p>
-                <p className="text-[11px] text-slate-500">Wasted</p>
-              </div>
-              <div className="flex flex-col gap-1 min-w-[120px]">
-                <div className="flex items-center justify-between mb-0.5">
-                  <span className="text-[11px] text-slate-400 flex items-center gap-1">
-                    <Activity size={10} />Productivity
-                  </span>
-                  <span className={`text-sm font-bold ${
-                    (screenTimeSummary.productivityPct ?? 0) >= 60 ? 'text-emerald-400'
-                    : (screenTimeSummary.productivityPct ?? 0) >= 40 ? 'text-amber-400' : 'text-red-400'}`}>
-                    {screenTimeSummary.productivityPct ?? 0}%
-                  </span>
-                </div>
-                <div className="h-2 bg-slate-700 rounded-full overflow-hidden">
-                  <div
-                    className={`h-full rounded-full transition-all ${
-                      (screenTimeSummary.productivityPct ?? 0) >= 60 ? 'bg-emerald-500'
-                      : (screenTimeSummary.productivityPct ?? 0) >= 40 ? 'bg-amber-500' : 'bg-red-500'}`}
-                    style={{ width: `${Math.min(screenTimeSummary.productivityPct ?? 0, 100)}%` }}
-                  />
-                </div>
-                <p className="text-[10px] text-slate-500 text-right">
-                  {(screenTimeSummary.productivityPct ?? 0) >= 60
-                    ? 'On track 🎯'
-                    : (screenTimeSummary.productivityPct ?? 0) >= 40
-                      ? 'Could improve 📈' : 'High distraction ⚠️'}
-                </p>
-              </div>
-            </div>
-          </div>
-        </Card>
-      )}
-
-      {/* ── Finance + Quote ── */}
-      <div className="grid lg:grid-cols-3 gap-6">
-        <Card className="lg:col-span-2" title="Finance Snapshot" subtitle="This month">
-          <div className="grid grid-cols-3 gap-4 mb-4">
-            <div className="text-center p-3 rounded-lg bg-emerald-500/10 border border-emerald-500/20">
-              <p className="text-xs text-emerald-400 font-medium mb-1">Income</p>
-              <p className="text-lg font-bold text-emerald-300">
-                {formatCurrency(financeSnapshot?.currentMonthIncome ?? 0)}
-              </p>
-            </div>
-            <div className="text-center p-3 rounded-lg bg-red-500/10 border border-red-500/20">
-              <p className="text-xs text-red-400 font-medium mb-1">Expenses</p>
-              <p className="text-lg font-bold text-red-300">
-                {formatCurrency(financeSnapshot?.currentMonthExpenses ?? 0)}
-              </p>
-            </div>
-            <div className="text-center p-3 rounded-lg bg-blue-500/10 border border-blue-500/20">
-              <p className="text-xs text-blue-400 font-medium mb-1">Savings</p>
-              <p className={`text-lg font-bold ${(financeSnapshot?.savings ?? 0) >= 0 ? 'text-blue-300' : 'text-red-300'}`}>
-                {formatCurrency(financeSnapshot?.savings ?? 0)}
-              </p>
-            </div>
-          </div>
-          {financeSnapshot?.topBudgetWarnings?.length > 0 && (
-            <div className="space-y-2">
-              <p className="text-xs font-medium text-slate-400 flex items-center gap-1.5">
-                <AlertTriangle size={12} />Budget Alerts
-              </p>
-              {financeSnapshot.topBudgetWarnings.map((b: { id: string; name: string; percentage: number; status: string }) => (
-                <div key={b.id} className="flex items-center gap-3">
-                  <span className="text-sm text-slate-300 w-24 truncate">{b.name}</span>
-                  <ProgressBar value={b.percentage} color={b.status === 'danger' ? 'red' : 'amber'} size="sm" className="flex-1" />
-                  <span className={`text-xs font-semibold ${b.status === 'danger' ? 'text-red-400' : 'text-amber-400'}`}>
-                    {b.percentage}%
-                  </span>
-                </div>
-              ))}
-            </div>
-          )}
-        </Card>
-
-        <Card>
-          <div className="flex flex-col h-full justify-between">
-            <Star size={20} className="text-amber-400 mb-3" />
-            <blockquote className="text-slate-200 text-base font-medium leading-relaxed italic flex-1">
-              &ldquo;{motivationSummary?.todayQuote?.text ?? 'Every day is a new opportunity to grow and become better.'}&rdquo;
-            </blockquote>
-            {motivationSummary?.todayQuote?.author && (
-              <p className="text-slate-500 text-sm mt-4">— {motivationSummary.todayQuote.author}</p>
-            )}
-          </div>
-        </Card>
+      {/* ── Tab Bar ── */}
+      <div className="flex gap-1 p-1 bg-slate-800 rounded-xl border border-slate-700 w-fit">
+        <button onClick={() => setDashTab('weekly')}
+          className={`flex items-center gap-2 px-5 py-2.5 rounded-lg text-sm font-medium transition-all
+            ${dashTab === 'weekly' ? 'bg-blue-600 text-white shadow' : 'text-slate-400 hover:text-slate-100'}`}>
+          <CalendarDays size={15} />Weekly Overview
+        </button>
+        <button onClick={() => setDashTab('daily')}
+          className={`flex items-center gap-2 px-5 py-2.5 rounded-lg text-sm font-medium transition-all
+            ${dashTab === 'daily' ? 'bg-blue-600 text-white shadow' : 'text-slate-400 hover:text-slate-100'}`}>
+          <LayoutDashboard size={15} />Daily Overview
+        </button>
       </div>
 
-      {/* ── Recent XP Activity ── */}
-      {recentActivity?.length > 0 && (
-        <Card title="Recent Activity" subtitle="XP earned">
-          <div className="space-y-2">
-            {recentActivity.slice(0, 5).map((log: { id: string; action: string; xpEarned: number; createdAt: string }) => (
-              <div key={log.id}
-                className="flex items-center justify-between py-2 border-b border-slate-700/50 last:border-0">
-                <span className="text-sm text-slate-300 capitalize">{log.action.replace(/_/g, ' ')}</span>
-                <div className="flex items-center gap-1.5">
-                  <Flame size={12} className="text-amber-400" />
-                  <span className="text-sm font-semibold text-amber-400">+{log.xpEarned} XP</span>
-                  <span className="text-xs text-slate-500 ml-2">
-                    {format(new Date(log.createdAt), 'h:mm a')}
-                  </span>
+      {/* ══════════════ WEEKLY TAB ══════════════ */}
+      {dashTab === 'weekly' && (
+        <div className="space-y-6">
+          <WeekStrip
+            weekStart={weekStart}
+            selectedDay={selectedDay}
+            habits={allHabits}
+            logs={allLogs}
+            tasks={allTasks}
+            screenLogs={allScreenLogs}
+            onSelectDay={setSelectedDay}
+            onPrevWeek={() => { setWeekOffset(w => w - 1); setSelectedDay(null); }}
+            onNextWeek={() => { setWeekOffset(w => Math.min(w + 1, 0)); setSelectedDay(null); }}
+            canGoNext={weekOffset < 0}
+          />
+          {selectedDay && (
+            <DayDrillDown
+              day={selectedDay}
+              habits={allHabits}
+              logs={allLogs}
+              tasks={allTasks}
+              screenLogs={allScreenLogs}
+              onToggleHabit={(habitId, currentCompleted) => toggleHabit.mutate({ habitId, currentCompleted })}
+            />
+          )}
+        </div>
+      )}
+
+      {/* ══════════════ DAILY TAB ══════════════ */}
+      {dashTab === 'daily' && (
+        <div className="space-y-6">
+          {/* Today's Habit Progress */}
+          {allHabits.length > 0 && (
+            <div className="flex items-center gap-4 bg-slate-800 border border-slate-700 rounded-xl px-5 py-3.5">
+              <div className="flex items-center gap-2.5 flex-1">
+                <CheckSquare size={16} className={
+                  todayPct === 100 ? 'text-emerald-400' : todayPct >= 50 ? 'text-amber-400' : 'text-red-400'
+                } />
+                <span className="text-sm font-medium text-slate-300">Today&apos;s Habits</span>
+                <span className={`text-sm font-bold
+                  ${todayPct === 100 ? 'text-emerald-300' : todayPct >= 50 ? 'text-amber-300' : 'text-red-300'}`}>
+                  {doneTodayCount}/{allHabits.length}
+                </span>
+              </div>
+              <div className="w-40 flex items-center gap-2">
+                <div className="flex-1 h-2 bg-slate-700 rounded-full overflow-hidden">
+                  <div
+                    className={`h-full rounded-full transition-all
+                      ${todayPct === 100 ? 'bg-emerald-500' : todayPct >= 50 ? 'bg-amber-500' : 'bg-red-500'}`}
+                    style={{ width: `${todayPct}%` }} />
+                </div>
+                <span className={`text-xs font-bold tabular-nums w-8 text-right
+                  ${todayPct === 100 ? 'text-emerald-400' : todayPct >= 50 ? 'text-amber-400' : 'text-red-400'}`}>
+                  {todayPct}%
+                </span>
+              </div>
+              {todayPct === 100 && <span className="text-sm">🔥</span>}
+            </div>
+          )}
+
+          {/* Today's full drill-down */}
+          <DayDrillDown
+            day={now}
+            habits={allHabits}
+            logs={allLogs}
+            tasks={allTasks}
+            screenLogs={allScreenLogs}
+            onToggleHabit={(habitId, currentCompleted) => toggleHabit.mutate({ habitId, currentCompleted })}
+          />
+
+          {/* Screen Time */}
+          {(screenTimeSummary?.todayTotal !== null && screenTimeSummary?.todayTotal !== undefined) && (
+            <Card>
+              <div className="flex items-center justify-between flex-wrap gap-4">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-slate-700 flex items-center justify-center flex-shrink-0">
+                    <Monitor size={18} className="text-blue-400" />
+                  </div>
+                  <div>
+                    <p className="text-sm font-semibold text-slate-200">Screen Time Today</p>
+                    <p className="text-xs text-slate-500">
+                      {screenTimeSummary.isEstimate ? 'Based on 7-day average (no entry today)' : 'Logged today'}
+                    </p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-6 flex-wrap">
+                  <div className="text-center">
+                    <p className="text-lg font-bold text-slate-100">{screenTimeSummary.todayTotal?.toFixed(1)}h</p>
+                    <p className="text-[11px] text-slate-500">Total</p>
+                  </div>
+                  <div className="text-center">
+                    <p className="text-lg font-bold text-emerald-400">{(screenTimeSummary.todayProductive ?? 0).toFixed(1)}h</p>
+                    <p className="text-[11px] text-slate-500">Productive</p>
+                  </div>
+                  <div className="text-center">
+                    <p className="text-lg font-bold text-red-400">{(screenTimeSummary.unproductiveHours ?? 0).toFixed(1)}h</p>
+                    <p className="text-[11px] text-slate-500">Wasted</p>
+                  </div>
+                  <div className="flex flex-col gap-1 min-w-[120px]">
+                    <div className="flex items-center justify-between mb-0.5">
+                      <span className="text-[11px] text-slate-400 flex items-center gap-1">
+                        <Activity size={10} />Productivity
+                      </span>
+                      <span className={`text-sm font-bold ${
+                        (screenTimeSummary.productivityPct ?? 0) >= 60 ? 'text-emerald-400'
+                        : (screenTimeSummary.productivityPct ?? 0) >= 40 ? 'text-amber-400' : 'text-red-400'}`}>
+                        {screenTimeSummary.productivityPct ?? 0}%
+                      </span>
+                    </div>
+                    <div className="h-2 bg-slate-700 rounded-full overflow-hidden">
+                      <div
+                        className={`h-full rounded-full transition-all ${
+                          (screenTimeSummary.productivityPct ?? 0) >= 60 ? 'bg-emerald-500'
+                          : (screenTimeSummary.productivityPct ?? 0) >= 40 ? 'bg-amber-500' : 'bg-red-500'}`}
+                        style={{ width: `${Math.min(screenTimeSummary.productivityPct ?? 0, 100)}%` }} />
+                    </div>
+                    <p className="text-[10px] text-slate-500 text-right">
+                      {(screenTimeSummary.productivityPct ?? 0) >= 60 ? 'On track 🎯'
+                        : (screenTimeSummary.productivityPct ?? 0) >= 40 ? 'Could improve 📈' : 'High distraction ⚠️'}
+                    </p>
+                  </div>
                 </div>
               </div>
-            ))}
+            </Card>
+          )}
+
+          {/* Finance + Quote */}
+          <div className="grid lg:grid-cols-3 gap-6">
+            <Card className="lg:col-span-2" title="Finance Snapshot" subtitle="This month">
+              <div className="grid grid-cols-3 gap-4 mb-4">
+                <div className="text-center p-3 rounded-lg bg-emerald-500/10 border border-emerald-500/20">
+                  <p className="text-xs text-emerald-400 font-medium mb-1">Income</p>
+                  <p className="text-lg font-bold text-emerald-300">{formatCurrency(financeSnapshot?.currentMonthIncome ?? 0)}</p>
+                </div>
+                <div className="text-center p-3 rounded-lg bg-red-500/10 border border-red-500/20">
+                  <p className="text-xs text-red-400 font-medium mb-1">Expenses</p>
+                  <p className="text-lg font-bold text-red-300">{formatCurrency(financeSnapshot?.currentMonthExpenses ?? 0)}</p>
+                </div>
+                <div className="text-center p-3 rounded-lg bg-blue-500/10 border border-blue-500/20">
+                  <p className="text-xs text-blue-400 font-medium mb-1">Savings</p>
+                  <p className={`text-lg font-bold ${(financeSnapshot?.savings ?? 0) >= 0 ? 'text-blue-300' : 'text-red-300'}`}>
+                    {formatCurrency(financeSnapshot?.savings ?? 0)}
+                  </p>
+                </div>
+              </div>
+              {financeSnapshot?.topBudgetWarnings?.length > 0 && (
+                <div className="space-y-2">
+                  <p className="text-xs font-medium text-slate-400 flex items-center gap-1.5">
+                    <AlertTriangle size={12} />Budget Alerts
+                  </p>
+                  {financeSnapshot.topBudgetWarnings.map((b: { id: string; name: string; percentage: number; status: string }) => (
+                    <div key={b.id} className="flex items-center gap-3">
+                      <span className="text-sm text-slate-300 w-24 truncate">{b.name}</span>
+                      <ProgressBar value={b.percentage} color={b.status === 'danger' ? 'red' : 'amber'} size="sm" className="flex-1" />
+                      <span className={`text-xs font-semibold ${b.status === 'danger' ? 'text-red-400' : 'text-amber-400'}`}>
+                        {b.percentage}%
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </Card>
+
+            <Card>
+              <div className="flex flex-col h-full justify-between">
+                <Star size={20} className="text-amber-400 mb-3" />
+                <blockquote className="text-slate-200 text-base font-medium leading-relaxed italic flex-1">
+                  &ldquo;{motivationSummary?.todayQuote?.text ?? 'Every day is a new opportunity to grow and become better.'}&rdquo;
+                </blockquote>
+                {motivationSummary?.todayQuote?.author && (
+                  <p className="text-slate-500 text-sm mt-4">— {motivationSummary.todayQuote.author}</p>
+                )}
+              </div>
+            </Card>
           </div>
-        </Card>
+
+          {/* Recent XP */}
+          {recentActivity?.length > 0 && (
+            <Card title="Recent Activity" subtitle="XP earned">
+              <div className="space-y-2">
+                {recentActivity.slice(0, 5).map((log: { id: string; action: string; xpEarned: number; createdAt: string }) => (
+                  <div key={log.id} className="flex items-center justify-between py-2 border-b border-slate-700/50 last:border-0">
+                    <span className="text-sm text-slate-300 capitalize">{log.action.replace(/_/g, ' ')}</span>
+                    <div className="flex items-center gap-1.5">
+                      <Flame size={12} className="text-amber-400" />
+                      <span className="text-sm font-semibold text-amber-400">+{log.xpEarned} XP</span>
+                      <span className="text-xs text-slate-500 ml-2">{format(new Date(log.createdAt), 'h:mm a')}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </Card>
+          )}
+        </div>
       )}
     </div>
   );
