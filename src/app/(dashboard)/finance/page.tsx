@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useRef, useMemo } from 'react';
+import { useState, useRef, useMemo, useEffect } from 'react';
 import axios from 'axios';
 import * as XLSX from 'xlsx';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
@@ -55,7 +55,7 @@ interface TxFilters {
 }
 
 /* ─── Constants ─────────────────────────────────────────────────────────────── */
-const EXPENSE_CATS  = ['Food','Transport','Shopping','Entertainment','Health','Utilities','Home','Education','Travel','Insurance','Subscriptions','Other'];
+const EXPENSE_CATS  = ['ATM','BUX','Car Loan','Childcare benefit','Credit Card Payment','Flight','From Vidhya','From Sunil','Groceries & Utensils','Income','India Transfer','Insurance','Kids/Education','Leisure','Mortgage','Online shopping','Other','Restaurant','Shopping','Subside','Taxes','Tax Return','Telecom','Tikkie','To Vidhya','To Sunil','Transport','Utilities'];
 const INCOME_CATS   = ['Salary','Freelance','Investment','Business','Gift','Other'];
 const PAID_BY_OPTS  = ['sunil','vidhya','shared'];
 const EXPENSE_TYPES = ['Fixed','Variable','Discretionary','Recurring','One-time','Savings','Other'];
@@ -115,6 +115,58 @@ const PieTip = ({ active, payload }: { active?: boolean; payload?: { name: strin
   );
 };
 
+/* ─── Searchable Category Select ────────────────────────────────────────────── */
+function CategorySelect({ value, onChange, options, className = '' }: {
+  value: string; onChange: (v: string) => void; options: string[]; className?: string;
+}) {
+  const [search, setSearch] = useState('');
+  const [open, setOpen]     = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function handler(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) {
+        setOpen(false); setSearch('');
+      }
+    }
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []);
+
+  const filtered = options.filter(o => o.toLowerCase().includes(search.toLowerCase()));
+
+  return (
+    <div ref={ref} className={`relative ${className}`}>
+      <button type="button" onClick={() => setOpen(o => !o)}
+        className="w-full bg-slate-700 border border-slate-600 text-slate-100 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500 flex items-center justify-between">
+        <span className={value ? 'text-slate-100' : 'text-slate-500'}>{value || 'Select category'}</span>
+        <ChevronDown size={14} className="text-slate-400 flex-shrink-0 ml-2" />
+      </button>
+      {open && (
+        <div className="absolute z-50 mt-1 w-full bg-slate-700 border border-slate-600 rounded-lg shadow-xl overflow-hidden">
+          <div className="p-2 border-b border-slate-600/60">
+            <input autoFocus value={search} onChange={e => setSearch(e.target.value)}
+              placeholder="Search category…"
+              className="w-full bg-slate-600 border border-slate-500 text-slate-100 rounded px-2 py-1.5 text-sm focus:outline-none focus:border-blue-500 placeholder-slate-400" />
+          </div>
+          <div className="max-h-52 overflow-y-auto">
+            {filtered.length === 0 ? (
+              <p className="px-3 py-2 text-xs text-slate-500">No matches</p>
+            ) : filtered.map(o => (
+              <button key={o} type="button"
+                onClick={() => { onChange(o); setOpen(false); setSearch(''); }}
+                className={`w-full text-left px-3 py-2 text-sm transition-colors
+                  ${value === o ? 'bg-blue-500/20 text-blue-300 font-medium' : 'text-slate-200 hover:bg-slate-600'}`}>
+                {o}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 /* ═══════════════════════════════════════════════════════════════════════════════
    MAIN
 ═══════════════════════════════════════════════════════════════════════════════ */
@@ -148,6 +200,22 @@ export default function FinancePage() {
   const [expSort, setExpSort] = useState<{ col: string; dir: SortDir }>({ col: 'date', dir: 'desc' });
   function toggleSort(cur: { col: string; dir: SortDir }, col: string) {
     return cur.col === col ? { col, dir: (cur.dir === 'asc' ? 'desc' : 'asc') as SortDir } : { col, dir: 'desc' as SortDir };
+  }
+
+  /* ── Pie chart selection (filters transactions) ─────────────────────────── */
+  const [pieSelectedCat, setPieSelectedCat] = useState<string | null>(null);
+
+  function handlePieClick(entry: { name: string }, fromYtd: boolean) {
+    const cat = entry.name;
+    setPieSelectedCat(cat);
+    setTxF(p => ({ ...p, category: cat }));
+    setSubTab('transactions');
+    if (fromYtd) {
+      setParentTab('monthly');
+      setPeriodMode('custom');
+      setCustomFrom(ytdFrom);
+      setCustomTo(ytdTo);
+    }
   }
 
   /* ── Tx column filters ──────────────────────────────────────────────────── */
@@ -678,13 +746,16 @@ export default function FinancePage() {
 
             {/* Pie charts: Expenses, Income, Savings */}
             <div className="grid md:grid-cols-3 gap-4">
-              {[
+              {([
                 { title: 'Expenses by Category', data: expByCat,      colors: PIE_COLORS  },
                 { title: 'Income by Category',   data: incByCat,      colors: PIE_COLORS  },
                 { title: 'Savings Allocation',   data: savingsByCat,  colors: SAVINGS_PIE },
-              ].map(({ title, data, colors }) => (
+              ] as { title: string; data: { name: string; value: number }[]; colors: string[] }[]).map(({ title, data, colors }) => (
                 <div key={title} className="bg-slate-800 border border-slate-700 rounded-xl p-5">
-                  <h3 className="text-sm font-semibold text-slate-200 mb-1">{title}</h3>
+                  <div className="flex items-center justify-between mb-1">
+                    <h3 className="text-sm font-semibold text-slate-200">{title}</h3>
+                    <span className="text-[10px] text-slate-600">click to filter</span>
+                  </div>
                   {data.length === 0 ? (
                     <div className="flex flex-col items-center justify-center py-12 text-slate-600">
                       <PiggyBank size={28} className="mb-2 opacity-30" />
@@ -693,24 +764,20 @@ export default function FinancePage() {
                   ) : (
                     <ResponsiveContainer width="100%" height={320}>
                       <PieChart>
-                        <Pie
-                          data={data}
-                          cx="50%" cy="45%"
-                          outerRadius={100}
-                          innerRadius={40}
-                          dataKey="value"
-                          paddingAngle={2}>
-                          {data.map((_: unknown, i: number) => (
-                            <Cell key={i} fill={colors[i % colors.length]} stroke="transparent" />
+                        <Pie data={data} cx="50%" cy="45%" outerRadius={100} innerRadius={40}
+                          dataKey="value" paddingAngle={2} cursor="pointer"
+                          onClick={(entry: { name: string; value: number }) => handlePieClick(entry, true)}>
+                          {data.map((entry: { name: string; value: number }, i: number) => (
+                            <Cell key={i} fill={colors[i % colors.length]}
+                              stroke={entry.name === pieSelectedCat ? '#fff' : 'transparent'}
+                              strokeWidth={entry.name === pieSelectedCat ? 2 : 0}
+                              opacity={pieSelectedCat && entry.name !== pieSelectedCat ? 0.35 : 1} />
                           ))}
                         </Pie>
                         <Tooltip content={<PieTip />} />
-                        <Legend
-                          formatter={(value: string) => (
-                            <span style={{ color: '#cbd5e1', fontSize: 11 }}>{value}</span>
-                          )}
-                          wrapperStyle={{ paddingTop: 8 }}
-                        />
+                        <Legend formatter={(value: string) => (
+                          <span style={{ color: '#cbd5e1', fontSize: 11 }}>{value}</span>
+                        )} wrapperStyle={{ paddingTop: 8 }} />
                       </PieChart>
                     </ResponsiveContainer>
                   )}
@@ -825,7 +892,10 @@ export default function FinancePage() {
                 { title: 'Savings Allocation',   data: perSavingsByCat, colors: SAVINGS_PIE },
               ] as { title: string; data: { name: string; value: number }[]; colors: string[] }[]).map(({ title, data, colors }) => (
                 <div key={title} className="bg-slate-800 border border-slate-700 rounded-xl p-5">
-                  <h3 className="text-sm font-semibold text-slate-200 mb-1">{title}</h3>
+                  <div className="flex items-center justify-between mb-1">
+                    <h3 className="text-sm font-semibold text-slate-200">{title}</h3>
+                    <span className="text-[10px] text-slate-600">click to filter</span>
+                  </div>
                   {data.length === 0 ? (
                     <div className="flex flex-col items-center justify-center py-10 text-slate-600">
                       <PiggyBank size={24} className="mb-2 opacity-30" />
@@ -835,16 +905,18 @@ export default function FinancePage() {
                     <ResponsiveContainer width="100%" height={300}>
                       <PieChart>
                         <Pie data={data} cx="50%" cy="45%" outerRadius={95} innerRadius={38}
-                          dataKey="value" paddingAngle={2}>
-                          {data.map((_: unknown, i: number) => (
-                            <Cell key={i} fill={colors[i % colors.length]} stroke="transparent" />
+                          dataKey="value" paddingAngle={2} cursor="pointer"
+                          onClick={(entry: { name: string; value: number }) => handlePieClick(entry, false)}>
+                          {data.map((entry: { name: string; value: number }, i: number) => (
+                            <Cell key={i} fill={colors[i % colors.length]}
+                              stroke={entry.name === pieSelectedCat ? '#fff' : 'transparent'}
+                              strokeWidth={entry.name === pieSelectedCat ? 2 : 0}
+                              opacity={pieSelectedCat && entry.name !== pieSelectedCat ? 0.35 : 1} />
                           ))}
                         </Pie>
                         <Tooltip content={<PieTip />} />
-                        <Legend
-                          formatter={(value: string) => <span style={{ color: '#cbd5e1', fontSize: 11 }}>{value}</span>}
-                          wrapperStyle={{ paddingTop: 8 }}
-                        />
+                        <Legend formatter={(value: string) => <span style={{ color: '#cbd5e1', fontSize: 11 }}>{value}</span>}
+                          wrapperStyle={{ paddingTop: 8 }} />
                       </PieChart>
                     </ResponsiveContainer>
                   )}
@@ -887,8 +959,15 @@ export default function FinancePage() {
                           <Trash2 size={12} /> Delete {selTx.size}
                         </button>
                       )}
+                      {pieSelectedCat && txF.category === pieSelectedCat && (
+                        <span className="flex items-center gap-1.5 px-2.5 py-1 bg-indigo-500/15 border border-indigo-500/30 text-indigo-400 rounded-full text-xs font-medium">
+                          🥧 {pieSelectedCat}
+                          <button onClick={() => { setTxF(p => ({ ...p, category: '' })); setPieSelectedCat(null); }}
+                            className="hover:text-red-400 transition-colors ml-0.5"><X size={10} /></button>
+                        </span>
+                      )}
                       {hasFilter && (
-                        <button onClick={() => setTxF(emptyTxF)}
+                        <button onClick={() => { setTxF(emptyTxF); setPieSelectedCat(null); }}
                           className="flex items-center gap-1 px-2 py-1 bg-blue-500/10 border border-blue-500/20 text-blue-400 hover:bg-blue-500/20 rounded-lg text-xs transition-colors">
                           <X size={11} /> Clear filters
                         </button>
@@ -967,7 +1046,7 @@ export default function FinancePage() {
                               </td>
                               <td className="px-2 py-1.5">
                                 {hasFilter && (
-                                  <button onClick={() => setTxF(emptyTxF)} title="Clear filters"
+                                  <button onClick={() => { setTxF(emptyTxF); setPieSelectedCat(null); }} title="Clear filters"
                                     className="p-1 text-slate-500 hover:text-red-400 transition-colors rounded">
                                     <X size={12} />
                                   </button>
@@ -1341,7 +1420,8 @@ export default function FinancePage() {
               </div>
               <div><label className="text-xs text-slate-400 block mb-1">Description</label><input value={String(txForm.description ?? '')} onChange={e => setTxForm(p => ({ ...p, description: e.target.value }))} className={inp} /></div>
               <div className="grid grid-cols-2 gap-3">
-                <div><label className="text-xs text-slate-400 block mb-1">Category</label><select value={String(txForm.category ?? 'Other')} onChange={e => setTxForm(p => ({ ...p, category: e.target.value }))} className={sel}>{EXPENSE_CATS.map(c => <option key={c}>{c}</option>)}</select></div>
+                <div><label className="text-xs text-slate-400 block mb-1">Category</label>
+                  <CategorySelect value={String(txForm.category ?? 'Other')} onChange={v => setTxForm(p => ({ ...p, category: v }))} options={EXPENSE_CATS} /></div>
                 <div><label className="text-xs text-slate-400 block mb-1">Expense Type</label><select value={String(txForm.expenseType ?? '')} onChange={e => setTxForm(p => ({ ...p, expenseType: e.target.value }))} className={sel}><option value="">— none —</option>{EXPENSE_TYPES.map(t => <option key={t}>{t}</option>)}</select></div>
               </div>
               <div className="grid grid-cols-2 gap-3">
