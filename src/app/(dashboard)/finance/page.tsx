@@ -267,6 +267,28 @@ export default function FinancePage() {
     return Object.entries(m).map(([name, value]) => ({ name, value })).sort((a, b) => b.value - a.value);
   }, [ytdExpenses]);
 
+  /* ─── Period (monthly/custom) pie chart data ────────────────────────────── */
+  const perExpByCat = useMemo(() => {
+    const m: Record<string, number> = {};
+    periodExpenses.filter(e => e.expenseType !== 'Savings').forEach(e => { m[e.category] = (m[e.category] ?? 0) + e.amount; });
+    return Object.entries(m).map(([name, value]) => ({ name, value })).sort((a, b) => b.value - a.value);
+  }, [periodExpenses]);
+
+  const perIncByCat = useMemo(() => {
+    const m: Record<string, number> = {};
+    periodIncome.forEach(i => { m[i.category] = (m[i.category] ?? 0) + i.amount; });
+    return Object.entries(m).map(([name, value]) => ({ name, value })).sort((a, b) => b.value - a.value);
+  }, [periodIncome]);
+
+  const perSavingsByCat = useMemo(() => {
+    const m: Record<string, number> = {};
+    periodExpenses.filter(e => e.expenseType === 'Savings').forEach(e => {
+      const key = e.category || 'Savings';
+      m[key] = (m[key] ?? 0) + e.amount;
+    });
+    return Object.entries(m).map(([name, value]) => ({ name, value })).sort((a, b) => b.value - a.value);
+  }, [periodExpenses]);
+
   const combinedByCat = useMemo(() => {
     const cats = new Set([...expByCat.map(x => x.name), ...incByCat.map(x => x.name)]);
     return Array.from(cats).map(name => ({
@@ -793,6 +815,41 @@ export default function FinancePage() {
                 <span className={`font-semibold ${perSavings >= 0 ? 'text-blue-400' : 'text-red-400'}`}>net {formatEur(perSavings)}</span>
                 <span className="text-slate-600">({periodExpenses.length + periodIncome.length} txns)</span>
               </div>
+            </div>
+
+            {/* ── Period Pie Charts ── */}
+            <div className="grid md:grid-cols-3 gap-4">
+              {([
+                { title: 'Expenses by Category', data: perExpByCat,     colors: PIE_COLORS  },
+                { title: 'Income by Category',   data: perIncByCat,     colors: PIE_COLORS  },
+                { title: 'Savings Allocation',   data: perSavingsByCat, colors: SAVINGS_PIE },
+              ] as { title: string; data: { name: string; value: number }[]; colors: string[] }[]).map(({ title, data, colors }) => (
+                <div key={title} className="bg-slate-800 border border-slate-700 rounded-xl p-5">
+                  <h3 className="text-sm font-semibold text-slate-200 mb-1">{title}</h3>
+                  {data.length === 0 ? (
+                    <div className="flex flex-col items-center justify-center py-10 text-slate-600">
+                      <PiggyBank size={24} className="mb-2 opacity-30" />
+                      <p className="text-xs">No data for this period</p>
+                    </div>
+                  ) : (
+                    <ResponsiveContainer width="100%" height={300}>
+                      <PieChart>
+                        <Pie data={data} cx="50%" cy="45%" outerRadius={95} innerRadius={38}
+                          dataKey="value" paddingAngle={2}>
+                          {data.map((_: unknown, i: number) => (
+                            <Cell key={i} fill={colors[i % colors.length]} stroke="transparent" />
+                          ))}
+                        </Pie>
+                        <Tooltip content={<PieTip />} />
+                        <Legend
+                          formatter={(value: string) => <span style={{ color: '#cbd5e1', fontSize: 11 }}>{value}</span>}
+                          wrapperStyle={{ paddingTop: 8 }}
+                        />
+                      </PieChart>
+                    </ResponsiveContainer>
+                  )}
+                </div>
+              ))}
             </div>
 
             {/* Sub-tabs */}
